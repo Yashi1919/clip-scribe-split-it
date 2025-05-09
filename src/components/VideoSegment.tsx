@@ -1,5 +1,5 @@
 
-import { trash2, download } from "lucide-react";
+import { Trash2, Download } from "lucide-react";
 import VideoPlayer from "./VideoPlayer";
 import { Button } from "@/components/ui/button";
 import { formatTime } from "@/lib/videoUtils";
@@ -47,7 +47,7 @@ const VideoSegment = ({
           onClick={onDelete}
           className="text-xs"
         >
-          <trash2 className="h-4 w-4 mr-2" />
+          <Trash2 className="h-4 w-4 mr-2" />
           Delete
         </Button>
         
@@ -57,7 +57,7 @@ const VideoSegment = ({
           onClick={onDownload}
           className="text-xs"
         >
-          <download className="h-4 w-4 mr-2" />
+          <Download className="h-4 w-4 mr-2" />
           Download
         </Button>
       </div>

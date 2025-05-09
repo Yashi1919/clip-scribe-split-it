@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { download, scissors } from "lucide-react";
+import { Download, Scissors } from "lucide-react";
 import VideoSegment from "./VideoSegment";
 import { createVideoSegment, downloadFile } from "@/lib/videoUtils";
 
@@ -142,7 +142,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
             disabled={isProcessing}
             className="w-full sm:w-auto"
           >
-            <scissors className="mr-2 h-4 w-4" />
+            <Scissors className="mr-2 h-4 w-4" />
             Split Video
           </Button>
         </div>
@@ -169,7 +169,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                 disabled={segments.length === 0}
                 variant="default"
               >
-                <download className="mr-2 h-4 w-4" />
+                <Download className="mr-2 h-4 w-4" />
                 Download All ({segments.length})
               </Button>
             </div>

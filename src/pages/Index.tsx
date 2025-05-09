@@ -1,6 +1,6 @@
 
 import { useState } from "react";
-import { scissors, file, video } from "lucide-react";
+import { Scissors, File, Video } from "lucide-react";
 import VideoUploader from "@/components/VideoUploader";
 import VideoPlayer from "@/components/VideoPlayer";
 import VideoSplitter from "@/components/VideoSplitter";
@@ -23,7 +23,7 @@ const Index = () => {
     <div className="container max-w-6xl mx-auto py-8 px-4 min-h-screen">
       <header className="mb-8 text-center">
         <div className="inline-flex items-center gap-2 mb-2">
-          <scissors className="h-8 w-8 text-primary" />
+          <Scissors className="h-8 w-8 text-primary" />
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
             Clip<span className="text-accent">Scribe</span>
           </h1>
@@ -36,7 +36,7 @@ const Index = () => {
       <div className="space-y-10">
         <section>
           <h2 className="text-2xl font-bold tracking-tight mb-4 flex items-center">
-            <file className="mr-2 h-5 w-5" />
+            <File className="mr-2 h-5 w-5" />
             Upload Video
           </h2>
           <VideoUploader onVideoUploaded={handleVideoUploaded} />
@@ -45,7 +45,7 @@ const Index = () => {
         {videoUrl && (
           <section>
             <h2 className="text-2xl font-bold tracking-tight mb-4 flex items-center">
-              <video className="mr-2 h-5 w-5" />
+              <Video className="mr-2 h-5 w-5" />
               Video Preview
             </h2>
             <div className="max-w-3xl mx-auto">
@@ -68,7 +68,7 @@ const Index = () => {
         {videoFile && videoUrl && videoDuration > 0 && (
           <section>
             <h2 className="text-2xl font-bold tracking-tight mb-4 flex items-center">
-              <scissors className="mr-2 h-5 w-5" />
+              <Scissors className="mr-2 h-5 w-5" />
               Split Video
             </h2>
             <VideoSplitter
