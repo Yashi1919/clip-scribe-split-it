@@ -1,0 +1,229 @@
+
+import { useState, useRef, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
+import { formatTime } from "@/lib/videoUtils";
+import { Play, Pause, Scissors } from "lucide-react";
+
+interface VideoTimelineEditorProps {
+  videoUrl: string;
+  videoDuration: number;
+  onCutSegment: (startTime: number, endTime: number) => void;
+}
+
+const VideoTimelineEditor = ({
+  videoUrl,
+  videoDuration,
+  onCutSegment,
+}: VideoTimelineEditorProps) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [markers, setMarkers] = useState<number[]>([]);
+  const [selectionStart, setSelectionStart] = useState<number | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(video.currentTime);
+    };
+
+    video.addEventListener("timeupdate", handleTimeUpdate);
+    
+    return () => {
+      video.removeEventListener("timeupdate", handleTimeUpdate);
+    };
+  }, []);
+
+  const togglePlayPause = () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (isPlaying) {
+      video.pause();
+      setIsPlaying(false);
+    } else {
+      video.play();
+      setIsPlaying(true);
+    }
+  };
+
+  const handleSliderChange = (value: number[]) => {
+    const video = videoRef.current;
+    if (!video) return;
+    
+    const newTime = value[0];
+    video.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const addMarker = () => {
+    // Add current time as a marker if it doesn't exist already
+    if (!markers.includes(currentTime)) {
+      const newMarkers = [...markers, currentTime].sort((a, b) => a - b);
+      setMarkers(newMarkers);
+    }
+  };
+
+  const clearMarkers = () => {
+    setMarkers([]);
+    setSelectionStart(null);
+    setSelectionEnd(null);
+  };
+
+  const handleMarkerClick = (markerTime: number) => {
+    if (selectionStart === null) {
+      // First marker selected
+      setSelectionStart(markerTime);
+    } else if (selectionEnd === null) {
+      // Second marker selected
+      if (markerTime > selectionStart) {
+        setSelectionEnd(markerTime);
+      } else {
+        // If second marker is before the first, swap them
+        setSelectionEnd(selectionStart);
+        setSelectionStart(markerTime);
+      }
+    } else {
+      // Reset selection and start a new one
+      setSelectionStart(markerTime);
+      setSelectionEnd(null);
+    }
+  };
+
+  const handleCutSegment = () => {
+    if (selectionStart !== null && selectionEnd !== null) {
+      onCutSegment(selectionStart, selectionEnd);
+      // Reset selection after cutting
+      setSelectionStart(null);
+      setSelectionEnd(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4 border rounded-lg p-4 bg-card">
+      <div className="aspect-video bg-black rounded-md overflow-hidden relative">
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          className="w-full h-full object-contain"
+        />
+      </div>
+      
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={togglePlayPause}
+          >
+            {isPlaying ? <Pause className="h-4 w-4 mr-2" /> : <Play className="h-4 w-4 mr-2" />}
+            {isPlaying ? "Pause" : "Play"}
+          </Button>
+          
+          <div className="text-sm text-muted-foreground">
+            {formatTime(currentTime)} / {formatTime(videoDuration)}
+          </div>
+        </div>
+        
+        <div className="relative">
+          <Slider 
+            value={[currentTime]}
+            min={0}
+            max={videoDuration}
+            step={0.01}
+            onValueChange={handleSliderChange}
+            className="w-full"
+          />
+          
+          {/* Render markers */}
+          <div className="absolute inset-0 pointer-events-none">
+            {markers.map((markerTime, index) => (
+              <div 
+                key={index}
+                className="absolute top-0 w-0.5 h-5 bg-red-500 -translate-x-1/2 cursor-pointer"
+                style={{ left: `${(markerTime / videoDuration) * 100}%` }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleMarkerClick(markerTime);
+                }}
+              />
+            ))}
+          </div>
+          
+          {/* Render selection range */}
+          {selectionStart !== null && (
+            <div 
+              className={`absolute top-0 h-5 bg-primary/30 pointer-events-none`}
+              style={{ 
+                left: `${(selectionStart / videoDuration) * 100}%`, 
+                width: selectionEnd !== null 
+                  ? `${((selectionEnd - selectionStart) / videoDuration) * 100}%` 
+                  : '0'
+              }}
+            />
+          )}
+        </div>
+      </div>
+      
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={addMarker}
+        >
+          Add Marker at {formatTime(currentTime)}
+        </Button>
+        
+        <Button
+          variant="outline"
+          size="sm" 
+          onClick={clearMarkers}
+        >
+          Clear Markers
+        </Button>
+        
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={handleCutSegment}
+          disabled={selectionStart === null || selectionEnd === null}
+        >
+          <Scissors className="h-4 w-4 mr-1" />
+          Cut Segment ({selectionStart !== null && selectionEnd !== null
+            ? `${formatTime(selectionStart)} - ${formatTime(selectionEnd)}`
+            : "Select markers"}
+          )
+        </Button>
+      </div>
+      
+      {markers.length > 0 && (
+        <div className="text-sm text-muted-foreground">
+          <p className="mb-1">Markers:</p>
+          <div className="flex flex-wrap gap-1">
+            {markers.map((marker, index) => (
+              <Button 
+                key={index}
+                size="sm"
+                variant="ghost"
+                className={`text-xs px-2 py-1 h-auto ${
+                  marker === selectionStart || marker === selectionEnd 
+                    ? 'bg-primary/20' 
+                    : ''
+                }`}
+                onClick={() => handleMarkerClick(marker)}
+              >
+                {formatTime(marker)}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default VideoTimelineEditor;
