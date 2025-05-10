@@ -1,9 +1,9 @@
 
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { formatTime } from "@/lib/videoUtils";
-import { Play, Pause, Scissors } from "lucide-react";
+import { Play, Pause, Scissors, Trash } from "lucide-react";
 
 interface VideoTimelineEditorProps {
   videoUrl: string;
@@ -74,7 +74,29 @@ const VideoTimelineEditor = ({
     setSelectionEnd(null);
   };
 
-  const handleMarkerClick = (markerTime: number) => {
+  const deleteMarker = (markerTime: number) => {
+    // Remove the marker
+    const newMarkers = markers.filter(time => time !== markerTime);
+    setMarkers(newMarkers);
+    
+    // If the deleted marker was part of the selection, reset the selection
+    if (markerTime === selectionStart) {
+      setSelectionStart(null);
+      if (selectionEnd !== null) {
+        setSelectionEnd(null);
+      }
+    } else if (markerTime === selectionEnd) {
+      setSelectionEnd(null);
+    }
+  };
+
+  const handleMarkerClick = (markerTime: number, event: React.MouseEvent) => {
+    // If ctrl/cmd key is pressed, delete the marker instead of selecting it
+    if (event.ctrlKey || event.metaKey) {
+      deleteMarker(markerTime);
+      return;
+    }
+
     if (selectionStart === null) {
       // First marker selected
       setSelectionStart(markerTime);
@@ -144,13 +166,27 @@ const VideoTimelineEditor = ({
             {markers.map((markerTime, index) => (
               <div 
                 key={index}
-                className="absolute top-0 w-0.5 h-5 bg-red-500 -translate-x-1/2 cursor-pointer"
+                className="absolute top-0 flex flex-col items-center pointer-events-auto"
                 style={{ left: `${(markerTime / videoDuration) * 100}%` }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleMarkerClick(markerTime);
-                }}
-              />
+              >
+                <div 
+                  className={`w-0.5 h-5 bg-red-500 cursor-pointer ${
+                    markerTime === selectionStart || markerTime === selectionEnd 
+                      ? 'bg-primary' 
+                      : 'bg-red-500'
+                  }`}
+                  onClick={(e) => handleMarkerClick(markerTime, e)}
+                  title="Click to select, Ctrl+Click to delete"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 w-5 p-0 opacity-60 hover:opacity-100"
+                  onClick={() => deleteMarker(markerTime)}
+                >
+                  <Trash className="h-3 w-3 text-destructive" />
+                </Button>
+              </div>
             ))}
           </div>
           
@@ -205,19 +241,28 @@ const VideoTimelineEditor = ({
           <p className="mb-1">Markers:</p>
           <div className="flex flex-wrap gap-1">
             {markers.map((marker, index) => (
-              <Button 
-                key={index}
-                size="sm"
-                variant="ghost"
-                className={`text-xs px-2 py-1 h-auto ${
-                  marker === selectionStart || marker === selectionEnd 
-                    ? 'bg-primary/20' 
-                    : ''
-                }`}
-                onClick={() => handleMarkerClick(marker)}
-              >
-                {formatTime(marker)}
-              </Button>
+              <div key={index} className="flex items-center gap-1">
+                <Button 
+                  size="sm"
+                  variant="ghost"
+                  className={`text-xs px-2 py-1 h-auto ${
+                    marker === selectionStart || marker === selectionEnd 
+                      ? 'bg-primary/20' 
+                      : ''
+                  }`}
+                  onClick={(e) => handleMarkerClick(marker, e)}
+                >
+                  {formatTime(marker)}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-5 w-5 p-0"
+                  onClick={() => deleteMarker(marker)}
+                >
+                  <Trash className="h-3 w-3 text-destructive" />
+                </Button>
+              </div>
             ))}
           </div>
         </div>

@@ -1,10 +1,10 @@
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Download, Scissors, Plus } from "lucide-react";
+import { Download, Scissors, Plus, Trash } from "lucide-react";
 import VideoSegment from "./VideoSegment";
 import VideoTimelineEditor from "./VideoTimelineEditor";
 import { createVideoSegment, downloadFile, formatTime } from "@/lib/videoUtils";
