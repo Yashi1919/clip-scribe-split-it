@@ -12,6 +12,8 @@ interface VideoSegmentProps {
   onDelete: () => void;
   onDownload: () => void;
   type?: "cut" | "remove";
+  isSelected?: boolean;
+  onClick?: () => void;
 }
 
 const VideoSegment = ({
@@ -21,12 +23,18 @@ const VideoSegment = ({
   endTime,
   onDelete,
   onDownload,
-  type = "cut"
+  type = "cut",
+  isSelected = false,
+  onClick
 }: VideoSegmentProps) => {
   return (
-    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden flex flex-col fade-in ${
-      type === "remove" ? "border-2 border-destructive/30" : ""
-    }`}>
+    <div 
+      className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden flex flex-col fade-in 
+        ${type === "remove" ? "border-2 border-destructive/30" : ""}
+        ${isSelected ? "ring-2 ring-primary shadow-lg" : ""}
+        ${onClick ? "cursor-pointer transition-all hover:shadow-lg" : ""}`}
+      onClick={onClick}
+    >
       <div className={`p-3 ${
         type === "remove" ? "bg-destructive/20" : "bg-secondary/30"
       } border-b flex items-center justify-between`}>
@@ -38,6 +46,7 @@ const VideoSegment = ({
           )}
           <h3 className="font-medium">
             {type === "remove" ? "Remove" : "Segment"} {index + 1}
+            {isSelected && <span className="ml-2 text-primary">(Selected)</span>}
           </h3>
         </div>
         <span className="text-xs text-muted-foreground">
@@ -59,7 +68,10 @@ const VideoSegment = ({
         <Button
           variant="destructive"
           size="sm"
-          onClick={onDelete}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
           className="text-xs"
         >
           <Trash2 className="h-4 w-4 mr-2" />
@@ -70,7 +82,10 @@ const VideoSegment = ({
           <Button
             variant="outline"
             size="sm"
-            onClick={onDownload}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDownload();
+            }}
             className="text-xs"
           >
             <Download className="h-4 w-4 mr-2" />

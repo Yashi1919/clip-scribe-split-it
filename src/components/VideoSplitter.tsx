@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Download, Scissors, Plus, Trash } from "lucide-react";
 import VideoSegment from "./VideoSegment";
 import VideoTimelineEditor from "./VideoTimelineEditor";
+import MultiSplitEditor from "./MultiSplitEditor";
 import { createVideoSegment, downloadFile, formatTime } from "@/lib/videoUtils";
 import { removeVideoSegment } from "@/lib/VideoProcessor";
 
@@ -30,10 +31,11 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
   const [splitComplete, setSplitComplete] = useState<boolean>(false);
   const [customStartTime, setCustomStartTime] = useState<number>(0);
   const [customEndTime, setCustomEndTime] = useState<number>(Math.min(10, videoDuration)); 
-  const [editorVisible, setEditorVisible] = useState<boolean>(false);
+  const [editorMode, setEditorMode] = useState<"simple" | "timeline" | "multi">("simple");
   const [editedVideoUrl, setEditedVideoUrl] = useState<string | null>(null);
   const [remainingDuration, setRemainingDuration] = useState<number>(videoDuration);
   const [processedVideoFile, setProcessedVideoFile] = useState<File | null>(null);
+  const [selectedSegment, setSelectedSegment] = useState<string | null>(null);
 
   const handleSplitVideo = () => {
     if (numSegments < 2) {
@@ -63,6 +65,34 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     setSplitComplete(true);
     setIsProcessing(false);
     toast.success(`Video split into ${numSegments} segments`);
+  };
+
+  const handleMultiSplit = (splitPoints: number[]) => {
+    if (splitPoints.length === 0) {
+      toast.error("No split points defined");
+      return;
+    }
+
+    setIsProcessing(true);
+    
+    // Create segments based on split points
+    // Start with segment from 0 to first split point
+    const allPoints = [0, ...splitPoints, videoDuration];
+    
+    const newSegments = [];
+    for (let i = 0; i < allPoints.length - 1; i++) {
+      newSegments.push({
+        id: `segment-${i}`,
+        startTime: allPoints[i],
+        endTime: allPoints[i + 1],
+        type: "cut" as const
+      });
+    }
+    
+    setSegments(newSegments);
+    setSplitComplete(true);
+    setIsProcessing(false);
+    toast.success(`Video split into ${newSegments.length} segments`);
   };
 
   const handleAddCustomPart = () => {
@@ -164,6 +194,9 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
 
   const handleDeleteSegment = (segmentId: string) => {
     setSegments(segments.filter(segment => segment.id !== segmentId));
+    if (selectedSegment === segmentId) {
+      setSelectedSegment(null);
+    }
     toast.success("Segment deleted");
   };
 
@@ -248,6 +281,10 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     }
   };
 
+  const handleSegmentClick = (segmentId: string) => {
+    setSelectedSegment(selectedSegment === segmentId ? null : segmentId);
+  };
+
   // Use edited video URL if available, otherwise use original
   const currentVideoUrl = editedVideoUrl || videoUrl;
 
@@ -255,29 +292,42 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     <div className="space-y-6">
       {!splitComplete ? (
         <div className="space-y-4">
-          <div className="tabs flex space-x-2 mb-6">
+          <div className="tabs flex flex-wrap space-x-2 mb-6">
             <Button
-              variant={!editorVisible ? "default" : "outline"}
-              onClick={() => setEditorVisible(false)}
-              className="rounded-full"
+              variant={editorMode === "simple" ? "default" : "outline"}
+              onClick={() => setEditorMode("simple")}
+              className="rounded-full mb-2"
             >
               Simple Split
             </Button>
             <Button
-              variant={editorVisible ? "default" : "outline"}
-              onClick={() => setEditorVisible(true)}
-              className="rounded-full"
+              variant={editorMode === "multi" ? "default" : "outline"}
+              onClick={() => setEditorMode("multi")}
+              className="rounded-full mb-2"
             >
-              Advanced Editor
+              Advanced Split
+            </Button>
+            <Button
+              variant={editorMode === "timeline" ? "default" : "outline"}
+              onClick={() => setEditorMode("timeline")}
+              className="rounded-full mb-2"
+            >
+              Timeline Editor
             </Button>
           </div>
 
-          {editorVisible ? (
+          {editorMode === "timeline" ? (
             <VideoTimelineEditor 
               videoUrl={currentVideoUrl}
               videoDuration={videoDuration}
               onCutSegment={handleCutSegment}
               onRemoveSegment={handleRemoveSegment}
+            />
+          ) : editorMode === "multi" ? (
+            <MultiSplitEditor
+              videoUrl={currentVideoUrl}
+              videoDuration={videoDuration}
+              onSplitApply={handleMultiSplit}
             />
           ) : (
             <div className="p-6 border rounded-lg bg-card">
@@ -372,6 +422,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                   setSplitComplete(false);
                   setEditedVideoUrl(null);
                   setProcessedVideoFile(null);
+                  setSelectedSegment(null);
                 }}
                 variant="outline"
               >
@@ -423,13 +474,63 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
             </div>
           ) : (
             <div className="space-y-4">
+              {selectedSegment && (
+                <div className="p-4 bg-secondary/20 rounded-lg border">
+                  <h3 className="text-lg font-medium mb-2">Selected Segment</h3>
+                  {(() => {
+                    const segment = segments.find(s => s.id === selectedSegment);
+                    if (!segment) return null;
+                    
+                    return (
+                      <div className="flex flex-wrap gap-4 items-center">
+                        <div>
+                          <p className="text-sm font-medium">Time Range</p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatTime(segment.startTime)} - {formatTime(segment.endTime)} 
+                            ({(segment.endTime - segment.startTime).toFixed(1)}s)
+                          </p>
+                        </div>
+                        
+                        <div className="flex gap-2">
+                          <Button 
+                            variant="destructive" 
+                            size="sm"
+                            onClick={() => handleDeleteSegment(segment.id)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete Segment
+                          </Button>
+                          
+                          {segment.type !== "remove" && (
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => {
+                                const index = segments.findIndex(s => s.id === segment.id);
+                                handleDownloadSegment(segment, index);
+                              }}
+                            >
+                              <Download className="mr-2 h-4 w-4" />
+                              Download This Segment
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+              
               <div className="flex flex-wrap items-center gap-2 mb-4">
-                <h3 className="text-lg font-medium">Segments to Cut/Keep:</h3>
+                <h3 className="text-lg font-medium">Segments:</h3>
                 {segments.some(s => s.type === "remove") && (
                   <span className="text-sm bg-destructive/20 text-destructive px-2 py-1 rounded-md">
                     {segments.filter(s => s.type === "remove").length} segments marked for removal
                   </span>
                 )}
+                <span className="text-sm text-muted-foreground">
+                  (Click on a segment to select it)
+                </span>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -443,6 +544,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                     onDelete={() => handleDeleteSegment(segment.id)}
                     onDownload={() => segment.type !== "remove" && handleDownloadSegment(segment, index)}
                     type={segment.type}
+                    isSelected={segment.id === selectedSegment}
+                    onClick={() => handleSegmentClick(segment.id)}
                   />
                 ))}
               </div>

@@ -1,4 +1,5 @@
-import React, { useRef, useEffect, useState } from "react";
+
+import React, { forwardRef, useRef, useEffect, useState } from "react";
 import { Play, Pause } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -13,9 +14,10 @@ interface VideoPlayerProps {
   controls?: boolean;
   loop?: boolean;
   onLoadedMetadata?: (duration: number) => void;
+  onTimeUpdate?: (currentTime: number) => void;
 }
 
-const VideoPlayer = ({
+const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
   src,
   startTime = 0,
   endTime,
@@ -24,11 +26,22 @@ const VideoPlayer = ({
   controls = true,
   loop = false,
   onLoadedMetadata,
-}: VideoPlayerProps) => {
+  onTimeUpdate,
+}, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+
+  // Combine the forwarded ref with our local ref
+  const combinedRef = (node: HTMLVideoElement) => {
+    videoRef.current = node;
+    if (typeof ref === 'function') {
+      ref(node);
+    } else if (ref) {
+      ref.current = node;
+    }
+  };
 
   useEffect(() => {
     const video = videoRef.current;
@@ -36,6 +49,9 @@ const VideoPlayer = ({
 
     const handleTimeUpdate = () => {
       setCurrentTime(video.currentTime);
+      if (onTimeUpdate) {
+        onTimeUpdate(video.currentTime);
+      }
       
       // If we're using a clip with an end time, pause when we reach it
       if (endTime && video.currentTime >= endTime) {
@@ -82,7 +98,7 @@ const VideoPlayer = ({
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.removeEventListener("ended", handleEnded);
     };
-  }, [src, startTime, endTime, autoPlay, loop, onLoadedMetadata]);
+  }, [src, startTime, endTime, autoPlay, loop, onLoadedMetadata, onTimeUpdate]);
 
   const togglePlayPause = () => {
     const video = videoRef.current;
@@ -120,9 +136,9 @@ const VideoPlayer = ({
   const effectiveDuration = effectiveEndTime - startTime;
 
   return (
-    <div className={cn("video-container", className)}>
+    <div className={cn("video-container relative", className)}>
       <video
-        ref={videoRef}
+        ref={combinedRef}
         src={src}
         className="w-full h-full object-contain"
         playsInline
@@ -159,6 +175,8 @@ const VideoPlayer = ({
       )}
     </div>
   );
-};
+});
+
+VideoPlayer.displayName = "VideoPlayer";
 
 export default VideoPlayer;
