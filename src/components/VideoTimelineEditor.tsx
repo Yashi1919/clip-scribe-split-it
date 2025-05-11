@@ -3,18 +3,20 @@ import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { formatTime } from "@/lib/videoUtils";
-import { Play, Pause, Scissors, Trash } from "lucide-react";
+import { Play, Pause, Scissors, Trash, Cut, X } from "lucide-react";
 
 interface VideoTimelineEditorProps {
   videoUrl: string;
   videoDuration: number;
   onCutSegment: (startTime: number, endTime: number) => void;
+  onRemoveSegment?: (startTime: number, endTime: number) => void;
 }
 
 const VideoTimelineEditor = ({
   videoUrl,
   videoDuration,
   onCutSegment,
+  onRemoveSegment,
 }: VideoTimelineEditorProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -22,6 +24,7 @@ const VideoTimelineEditor = ({
   const [markers, setMarkers] = useState<number[]>([]);
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
+  const [mode, setMode] = useState<"cut" | "remove">("cut");
 
   useEffect(() => {
     const video = videoRef.current;
@@ -118,11 +121,19 @@ const VideoTimelineEditor = ({
 
   const handleCutSegment = () => {
     if (selectionStart !== null && selectionEnd !== null) {
-      onCutSegment(selectionStart, selectionEnd);
+      if (mode === "cut") {
+        onCutSegment(selectionStart, selectionEnd);
+      } else if (mode === "remove" && onRemoveSegment) {
+        onRemoveSegment(selectionStart, selectionEnd);
+      }
       // Reset selection after cutting
       setSelectionStart(null);
       setSelectionEnd(null);
     }
+  };
+
+  const toggleMode = () => {
+    setMode(mode === "cut" ? "remove" : "cut");
   };
 
   return (
@@ -170,7 +181,7 @@ const VideoTimelineEditor = ({
                 style={{ left: `${(markerTime / videoDuration) * 100}%` }}
               >
                 <div 
-                  className={`w-0.5 h-5 bg-red-500 cursor-pointer ${
+                  className={`w-0.5 h-5 cursor-pointer ${
                     markerTime === selectionStart || markerTime === selectionEnd 
                       ? 'bg-primary' 
                       : 'bg-red-500'
@@ -193,7 +204,9 @@ const VideoTimelineEditor = ({
           {/* Render selection range */}
           {selectionStart !== null && (
             <div 
-              className={`absolute top-0 h-5 bg-primary/30 pointer-events-none`}
+              className={`absolute top-0 h-5 ${
+                mode === "cut" ? "bg-primary/30" : "bg-destructive/30"
+              } pointer-events-none`}
               style={{ 
                 left: `${(selectionStart / videoDuration) * 100}%`, 
                 width: selectionEnd !== null 
@@ -223,13 +236,28 @@ const VideoTimelineEditor = ({
         </Button>
         
         <Button
-          variant="secondary"
+          variant={mode === "cut" ? "secondary" : "destructive"}
+          size="sm"
+          onClick={toggleMode}
+        >
+          {mode === "cut" ? 
+            <Scissors className="h-4 w-4 mr-1" /> : 
+            <X className="h-4 w-4 mr-1" />
+          }
+          Mode: {mode === "cut" ? "Cut Segment" : "Remove Segment"}
+        </Button>
+        
+        <Button
+          variant={mode === "cut" ? "secondary" : "destructive"}
           size="sm"
           onClick={handleCutSegment}
           disabled={selectionStart === null || selectionEnd === null}
         >
-          <Scissors className="h-4 w-4 mr-1" />
-          Cut Segment ({selectionStart !== null && selectionEnd !== null
+          {mode === "cut" ? 
+            <Scissors className="h-4 w-4 mr-1" /> : 
+            <X className="h-4 w-4 mr-1" />
+          }
+          {mode === "cut" ? "Cut" : "Remove"} Segment ({selectionStart !== null && selectionEnd !== null
             ? `${formatTime(selectionStart)} - ${formatTime(selectionEnd)}`
             : "Select markers"}
           )

@@ -29,6 +29,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
   const [customStartTime, setCustomStartTime] = useState<number>(0);
   const [customEndTime, setCustomEndTime] = useState<number>(Math.min(10, videoDuration)); 
   const [editorVisible, setEditorVisible] = useState<boolean>(false);
+  const [editedVideoUrl, setEditedVideoUrl] = useState<string>(videoUrl);
+  const [remainingDuration, setRemainingDuration] = useState<number>(videoDuration);
 
   const handleSplitVideo = () => {
     if (numSegments < 2) {
@@ -106,6 +108,12 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     }
     
     toast.success(`Cut segment added: ${formatTime(startTime)} - ${formatTime(endTime)}`);
+  };
+
+  const handleRemoveSegment = (startTime: number, endTime: number) => {
+    // For now, we'll just show a toast message since actual video editing requires more complex functionality
+    toast.success(`Selected to remove segment: ${formatTime(startTime)} - ${formatTime(endTime)}`);
+    // In a more advanced implementation, this would actually modify the video content
   };
 
   const handleDeleteSegment = (segmentId: string) => {
@@ -196,6 +204,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               videoUrl={videoUrl}
               videoDuration={videoDuration}
               onCutSegment={handleCutSegment}
+              onRemoveSegment={handleRemoveSegment}
             />
           ) : (
             <div className="p-6 border rounded-lg bg-card">
