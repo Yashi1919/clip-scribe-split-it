@@ -1,9 +1,8 @@
-
 import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { formatTime } from "@/lib/videoUtils";
-import { Play, Pause, Scissors, Trash, Cut, X } from "lucide-react";
+import { Play, Pause, Scissors, Trash, X } from "lucide-react";
 
 interface VideoTimelineEditorProps {
   videoUrl: string;

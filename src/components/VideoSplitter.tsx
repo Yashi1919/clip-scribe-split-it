@@ -8,6 +8,7 @@ import { Download, Scissors, Plus, Trash } from "lucide-react";
 import VideoSegment from "./VideoSegment";
 import VideoTimelineEditor from "./VideoTimelineEditor";
 import { createVideoSegment, downloadFile, formatTime } from "@/lib/videoUtils";
+import { removeVideoSegment } from "@/lib/VideoProcessor";
 
 interface VideoSplitterProps {
   videoFile: File;
@@ -19,6 +20,7 @@ interface Segment {
   id: string;
   startTime: number;
   endTime: number;
+  type?: "cut" | "remove";
 }
 
 const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProps) => {
@@ -29,8 +31,9 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
   const [customStartTime, setCustomStartTime] = useState<number>(0);
   const [customEndTime, setCustomEndTime] = useState<number>(Math.min(10, videoDuration)); 
   const [editorVisible, setEditorVisible] = useState<boolean>(false);
-  const [editedVideoUrl, setEditedVideoUrl] = useState<string>(videoUrl);
+  const [editedVideoUrl, setEditedVideoUrl] = useState<string | null>(null);
   const [remainingDuration, setRemainingDuration] = useState<number>(videoDuration);
+  const [processedVideoFile, setProcessedVideoFile] = useState<File | null>(null);
 
   const handleSplitVideo = () => {
     if (numSegments < 2) {
@@ -53,6 +56,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
       id: `segment-${index}`,
       startTime: index * segmentDuration,
       endTime: (index + 1) * segmentDuration,
+      type: "cut" as const
     }));
     
     setSegments(newSegments);
@@ -77,7 +81,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     const newSegment = {
       id: `segment-${Date.now()}`,
       startTime: customStartTime,
-      endTime: customEndTime
+      endTime: customEndTime,
+      type: "cut" as const
     };
     
     // Add to segments list
@@ -96,7 +101,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     const newSegment = {
       id: `segment-${Date.now()}`,
       startTime,
-      endTime
+      endTime,
+      type: "cut" as const
     };
     
     // Add to segments list
@@ -110,10 +116,50 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     toast.success(`Cut segment added: ${formatTime(startTime)} - ${formatTime(endTime)}`);
   };
 
-  const handleRemoveSegment = (startTime: number, endTime: number) => {
-    // For now, we'll just show a toast message since actual video editing requires more complex functionality
-    toast.success(`Selected to remove segment: ${formatTime(startTime)} - ${formatTime(endTime)}`);
-    // In a more advanced implementation, this would actually modify the video content
+  const handleRemoveSegment = async (startTime: number, endTime: number) => {
+    try {
+      toast.info("Processing video removal...");
+      setIsProcessing(true);
+      
+      // Create a "removal" segment for tracking purposes
+      const removalSegment = {
+        id: `remove-${Date.now()}`,
+        startTime,
+        endTime,
+        type: "remove" as const
+      };
+      
+      // Add to segments list
+      setSegments(prev => [...prev, removalSegment]);
+      
+      // Process the video to remove this segment
+      const processedBlob = await removeVideoSegment(videoFile, {
+        startTime,
+        endTime
+      });
+      
+      // Create a new file from the blob
+      const processedFile = new File([processedBlob], videoFile.name, {
+        type: processedBlob.type
+      });
+      
+      // Update the video source with the new processed video
+      const newVideoUrl = URL.createObjectURL(processedBlob);
+      setEditedVideoUrl(newVideoUrl);
+      setProcessedVideoFile(processedFile);
+      
+      // If this is the first segment, set splitComplete to true
+      if (!splitComplete) {
+        setSplitComplete(true);
+      }
+      
+      toast.success(`Segment removed: ${formatTime(startTime)} - ${formatTime(endTime)}`);
+      setIsProcessing(false);
+    } catch (error) {
+      console.error("Error removing segment:", error);
+      toast.error("Failed to remove segment");
+      setIsProcessing(false);
+    }
   };
 
   const handleDeleteSegment = (segmentId: string) => {
@@ -154,10 +200,12 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     
     try {
       // Process segments sequentially to avoid memory issues
-      for (let i = 0; i < segments.length; i++) {
-        const segment = segments[i];
+      const cutSegments = segments.filter(segment => segment.type !== "remove");
+      
+      for (let i = 0; i < cutSegments.length; i++) {
+        const segment = cutSegments[i];
         
-        toast.info(`Processing segment ${i + 1}/${segments.length}...`);
+        toast.info(`Processing segment ${i + 1}/${cutSegments.length}...`);
         
         const blob = await createVideoSegment(
           videoFile,
@@ -177,6 +225,31 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
       toast.error("Failed to download all segments");
     }
   };
+
+  const handleDownloadProcessed = () => {
+    if (!editedVideoUrl || !processedVideoFile) {
+      toast.error("No processed video available");
+      return;
+    }
+
+    try {
+      const originalName = videoFile.name.replace(/\.[^/.]+$/, "");
+      const fileName = `${originalName}-processed.webm`;
+      
+      // Create a blob from the processed file
+      const blob = new Blob([processedVideoFile], { type: processedVideoFile.type });
+      
+      downloadFile(blob, fileName);
+      
+      toast.success("Processed video downloaded");
+    } catch (error) {
+      console.error("Error downloading processed video:", error);
+      toast.error("Failed to download processed video");
+    }
+  };
+
+  // Use edited video URL if available, otherwise use original
+  const currentVideoUrl = editedVideoUrl || videoUrl;
 
   return (
     <div className="space-y-6">
@@ -201,7 +274,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
 
           {editorVisible ? (
             <VideoTimelineEditor 
-              videoUrl={videoUrl}
+              videoUrl={currentVideoUrl}
               videoDuration={videoDuration}
               onCutSegment={handleCutSegment}
               onRemoveSegment={handleRemoveSegment}
@@ -292,37 +365,48 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               {segments.length} Video {segments.length === 1 ? "Segment" : "Segments"}
             </h2>
             
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button 
                 onClick={() => {
                   setSegments([]);
                   setSplitComplete(false);
+                  setEditedVideoUrl(null);
+                  setProcessedVideoFile(null);
                 }}
                 variant="outline"
               >
                 Start Over
               </Button>
               
-              {splitComplete && (
-                <Button 
-                  onClick={() => {
-                    setSplitComplete(false);
-                  }}
-                  variant="secondary"
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add More Segments
-                </Button>
-              )}
+              <Button 
+                onClick={() => {
+                  setSplitComplete(false);
+                }}
+                variant="secondary"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add More Segments
+              </Button>
               
               <Button
                 onClick={handleDownloadAll}
-                disabled={segments.length === 0}
+                disabled={segments.length === 0 || isProcessing}
                 variant="default"
               >
                 <Download className="mr-2 h-4 w-4" />
-                Download All ({segments.length})
+                Download Segments ({segments.filter(s => s.type !== "remove").length})
               </Button>
+              
+              {editedVideoUrl && (
+                <Button
+                  onClick={handleDownloadProcessed}
+                  disabled={isProcessing}
+                  variant="secondary"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Download Processed Video
+                </Button>
+              )}
             </div>
           </div>
           
@@ -338,18 +422,30 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {segments.map((segment, index) => (
-                <VideoSegment
-                  key={segment.id}
-                  index={index}
-                  videoUrl={videoUrl}
-                  startTime={segment.startTime}
-                  endTime={segment.endTime}
-                  onDelete={() => handleDeleteSegment(segment.id)}
-                  onDownload={() => handleDownloadSegment(segment, index)}
-                />
-              ))}
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                <h3 className="text-lg font-medium">Segments to Cut/Keep:</h3>
+                {segments.some(s => s.type === "remove") && (
+                  <span className="text-sm bg-destructive/20 text-destructive px-2 py-1 rounded-md">
+                    {segments.filter(s => s.type === "remove").length} segments marked for removal
+                  </span>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {segments.map((segment, index) => (
+                  <VideoSegment
+                    key={segment.id}
+                    index={index}
+                    videoUrl={segment.type === "remove" ? videoUrl : currentVideoUrl}
+                    startTime={segment.startTime}
+                    endTime={segment.endTime}
+                    onDelete={() => handleDeleteSegment(segment.id)}
+                    onDownload={() => segment.type !== "remove" && handleDownloadSegment(segment, index)}
+                    type={segment.type}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </div>
