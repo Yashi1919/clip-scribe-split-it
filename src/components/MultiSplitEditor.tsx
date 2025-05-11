@@ -1,10 +1,9 @@
-
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Scissors, Play, Pause } from "lucide-react";
+import { Scissors, Play, Pause, Trash } from "lucide-react";
 import { formatTime } from "@/lib/videoUtils";
 import VideoPlayer from "./VideoPlayer";
 
@@ -201,7 +200,7 @@ const MultiSplitEditor = ({ videoUrl, videoDuration, onSplitApply }: MultiSplitE
                     className="h-8 w-8 p-0"
                     onClick={() => handleDeleteSplitPoint(index)}
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash className="h-3 w-3" />
                   </Button>
                 </div>
               ))

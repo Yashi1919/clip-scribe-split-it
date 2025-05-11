@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -497,7 +496,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                             size="sm"
                             onClick={() => handleDeleteSegment(segment.id)}
                           >
-                            <Trash2 className="mr-2 h-4 w-4" />
+                            <Trash className="mr-2 h-4 w-4" />
                             Delete Segment
                           </Button>
                           
