@@ -8,11 +8,24 @@ export type StorageSegment = {
   startTime: number;
   endTime: number;
   type?: "cut" | "remove";
+  label?: string; // Added for better segment identification
+  color?: string; // For visual differentiation on timeline
+  createdAt?: number; // Timestamp when segment was created
 };
 
 export type TimelineData = {
   markers: number[];
   selections?: { start: number | null; end: number | null }[];
+  zoomLevel?: number; // Added for timeline zoom persistence
+  position?: number; // Current position in video
+};
+
+export type VideoMetadata = {
+  duration: number;
+  width: number;
+  height: number;
+  format?: string;
+  lastAccessed: number;
 };
 
 /**
@@ -76,6 +89,32 @@ export const generateVideoId = (file: File): string => {
 };
 
 /**
+ * Save video metadata to localStorage
+ */
+export const saveVideoMetadata = (videoId: string, metadata: VideoMetadata): void => {
+  try {
+    localStorage.setItem(`metadata_${videoId}`, JSON.stringify(metadata));
+  } catch (error) {
+    console.error("Failed to save video metadata to localStorage:", error);
+  }
+};
+
+/**
+ * Load video metadata from localStorage
+ */
+export const loadVideoMetadata = (videoId: string): VideoMetadata | null => {
+  try {
+    const savedMetadata = localStorage.getItem(`metadata_${videoId}`);
+    if (savedMetadata) {
+      return JSON.parse(savedMetadata);
+    }
+  } catch (error) {
+    console.error("Failed to load video metadata from localStorage:", error);
+  }
+  return null;
+};
+
+/**
  * Clear all stored data for a specific video
  */
 export const clearVideoStorage = (videoId: string): void => {
@@ -83,7 +122,37 @@ export const clearVideoStorage = (videoId: string): void => {
     localStorage.removeItem(`segments_${videoId}`);
     localStorage.removeItem(`timeline_${videoId}`);
     localStorage.removeItem(`splitPoints_${videoId}`);
+    localStorage.removeItem(`metadata_${videoId}`);
+    localStorage.removeItem(`history_${videoId}`);
   } catch (error) {
     console.error("Failed to clear video data from localStorage:", error);
   }
+};
+
+/**
+ * Save edit history for undo/redo functionality
+ */
+export const saveHistoryToStorage = (videoId: string, history: any[]): void => {
+  try {
+    // Limit history size to prevent localStorage overflow
+    const limitedHistory = history.slice(-20);
+    localStorage.setItem(`history_${videoId}`, JSON.stringify(limitedHistory));
+  } catch (error) {
+    console.error("Failed to save history to localStorage:", error);
+  }
+};
+
+/**
+ * Load edit history from localStorage
+ */
+export const loadHistoryFromStorage = (videoId: string): any[] => {
+  try {
+    const savedHistory = localStorage.getItem(`history_${videoId}`);
+    if (savedHistory) {
+      return JSON.parse(savedHistory);
+    }
+  } catch (error) {
+    console.error("Failed to load history from localStorage:", error);
+  }
+  return [];
 };
