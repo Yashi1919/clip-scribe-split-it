@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,24 +11,54 @@ interface MultiSplitEditorProps {
   videoUrl: string;
   videoDuration: number;
   onSplitApply: (splitPoints: number[]) => void;
+  videoId?: string; // Optional ID to use for localStorage persistence
 }
 
-const MultiSplitEditor = ({ videoUrl, videoDuration, onSplitApply }: MultiSplitEditorProps) => {
+const MultiSplitEditor = ({ videoUrl, videoDuration, onSplitApply, videoId }: MultiSplitEditorProps) => {
   const [numSplits, setNumSplits] = useState<number>(2);
   const [splitPoints, setSplitPoints] = useState<number[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const videoRef = React.useRef<HTMLVideoElement>(null);
+  
+  const localStorageKey = videoId ? `splitPoints_${videoId}` : null;
+
+  // Load saved split points from localStorage if available
+  useEffect(() => {
+    if (localStorageKey) {
+      try {
+        const savedSplitPoints = localStorage.getItem(localStorageKey);
+        if (savedSplitPoints) {
+          const parsedPoints = JSON.parse(savedSplitPoints);
+          // Validate the points are within video duration
+          const validPoints = parsedPoints.filter((point: number) => 
+            point > 0 && point < videoDuration
+          );
+          setSplitPoints(validPoints);
+          setNumSplits(validPoints.length);
+        }
+      } catch (error) {
+        console.error("Failed to load split points from localStorage:", error);
+      }
+    }
+  }, [localStorageKey, videoDuration]);
 
   // When numSplits changes, calculate the equal division points
   React.useEffect(() => {
+    if (splitPoints.length === numSplits) return;
+    
     // Calculate split points (exclude 0 and videoDuration)
     const segmentDuration = videoDuration / (numSplits + 1);
     const newSplitPoints = Array.from({ length: numSplits }, (_, i) => 
       (i + 1) * segmentDuration
     );
     setSplitPoints(newSplitPoints);
-  }, [numSplits, videoDuration]);
+    
+    // Save to localStorage if we have a key
+    if (localStorageKey) {
+      localStorage.setItem(localStorageKey, JSON.stringify(newSplitPoints));
+    }
+  }, [numSplits, videoDuration, localStorageKey]);
 
   // Handle video playback
   const togglePlayPause = () => {
@@ -52,6 +82,11 @@ const MultiSplitEditor = ({ videoUrl, videoDuration, onSplitApply }: MultiSplitE
   // Apply the split points
   const handleApplySplits = () => {
     onSplitApply(splitPoints);
+    
+    // Save to localStorage if we have a key
+    if (localStorageKey) {
+      localStorage.setItem(localStorageKey, JSON.stringify(splitPoints));
+    }
   };
 
   // Adjust a specific split point
@@ -59,7 +94,13 @@ const MultiSplitEditor = ({ videoUrl, videoDuration, onSplitApply }: MultiSplitE
     const newSplitPoints = [...splitPoints];
     newSplitPoints[index] = value;
     // Sort split points to maintain order
-    setSplitPoints(newSplitPoints.sort((a, b) => a - b));
+    const sortedPoints = newSplitPoints.sort((a, b) => a - b);
+    setSplitPoints(sortedPoints);
+    
+    // Save to localStorage if we have a key
+    if (localStorageKey) {
+      localStorage.setItem(localStorageKey, JSON.stringify(sortedPoints));
+    }
   };
 
   // Delete a specific split point
@@ -67,6 +108,11 @@ const MultiSplitEditor = ({ videoUrl, videoDuration, onSplitApply }: MultiSplitE
     const newSplitPoints = splitPoints.filter((_, i) => i !== index);
     setSplitPoints(newSplitPoints);
     setNumSplits(newSplitPoints.length);
+    
+    // Save to localStorage if we have a key
+    if (localStorageKey) {
+      localStorage.setItem(localStorageKey, JSON.stringify(newSplitPoints));
+    }
   };
 
   // Add a split point at the current time
@@ -83,6 +129,11 @@ const MultiSplitEditor = ({ videoUrl, videoDuration, onSplitApply }: MultiSplitE
       const newSplitPoints = [...splitPoints, currentTime].sort((a, b) => a - b);
       setSplitPoints(newSplitPoints);
       setNumSplits(newSplitPoints.length);
+      
+      // Save to localStorage if we have a key
+      if (localStorageKey) {
+        localStorage.setItem(localStorageKey, JSON.stringify(newSplitPoints));
+      }
     }
   };
 

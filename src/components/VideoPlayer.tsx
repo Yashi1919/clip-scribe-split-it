@@ -13,8 +13,10 @@ interface VideoPlayerProps {
   autoPlay?: boolean;
   controls?: boolean;
   loop?: boolean;
+  seekable?: boolean; // New prop to enable/disable seeking
   onLoadedMetadata?: (duration: number) => void;
   onTimeUpdate?: (currentTime: number) => void;
+  onSeeked?: (time: number) => void; // New callback for when seeking completes
 }
 
 const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
@@ -25,13 +27,16 @@ const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
   autoPlay = false,
   controls = true,
   loop = false,
+  seekable = true,
   onLoadedMetadata,
   onTimeUpdate,
+  onSeeked,
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isSeeking, setIsSeeking] = useState(false);
 
   // Combine the forwarded ref with our local ref
   const combinedRef = (node: HTMLVideoElement) => {
@@ -48,9 +53,11 @@ const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
     if (!video) return;
 
     const handleTimeUpdate = () => {
-      setCurrentTime(video.currentTime);
-      if (onTimeUpdate) {
-        onTimeUpdate(video.currentTime);
+      if (!isSeeking) {
+        setCurrentTime(video.currentTime);
+        if (onTimeUpdate) {
+          onTimeUpdate(video.currentTime);
+        }
       }
       
       // If we're using a clip with an end time, pause when we reach it
@@ -81,10 +88,18 @@ const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
         setIsPlaying(true);
       }
     };
+    
+    const handleSeeked = () => {
+      if (onSeeked) {
+        onSeeked(video.currentTime);
+      }
+      setIsSeeking(false);
+    };
 
     video.addEventListener("timeupdate", handleTimeUpdate);
     video.addEventListener("loadedmetadata", handleLoadedMetadata);
     video.addEventListener("ended", handleEnded);
+    video.addEventListener("seeked", handleSeeked);
     
     if (autoPlay) {
       video.play().catch(() => {
@@ -97,8 +112,9 @@ const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
       video.removeEventListener("timeupdate", handleTimeUpdate);
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.removeEventListener("ended", handleEnded);
+      video.removeEventListener("seeked", handleSeeked);
     };
-  }, [src, startTime, endTime, autoPlay, loop, onLoadedMetadata, onTimeUpdate]);
+  }, [src, startTime, endTime, autoPlay, loop, onLoadedMetadata, onTimeUpdate, onSeeked, isSeeking]);
 
   const togglePlayPause = () => {
     const video = videoRef.current;
@@ -118,10 +134,13 @@ const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
   };
 
   const handleSliderChange = (value: number[]) => {
+    if (!seekable) return;
+    
     const video = videoRef.current;
     if (!video) return;
     
     const newTime = value[0];
+    setIsSeeking(true);
     video.currentTime = newTime;
     setCurrentTime(newTime);
   };
@@ -163,14 +182,16 @@ const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
             </div>
           </div>
           
-          <Slider 
-            value={[currentTime]}
-            min={startTime}
-            max={effectiveEndTime}
-            step={0.01}
-            onValueChange={handleSliderChange}
-            className="w-full"
-          />
+          {seekable && (
+            <Slider 
+              value={[currentTime]}
+              min={startTime}
+              max={effectiveEndTime}
+              step={0.01}
+              onValueChange={handleSliderChange}
+              className="w-full"
+            />
+          )}
         </div>
       )}
     </div>

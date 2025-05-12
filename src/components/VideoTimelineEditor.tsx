@@ -9,6 +9,7 @@ interface VideoTimelineEditorProps {
   videoDuration: number;
   onCutSegment: (startTime: number, endTime: number) => void;
   onRemoveSegment?: (startTime: number, endTime: number) => void;
+  videoId?: string; // Optional ID to use for localStorage persistence
 }
 
 const VideoTimelineEditor = ({
@@ -16,6 +17,7 @@ const VideoTimelineEditor = ({
   videoDuration,
   onCutSegment,
   onRemoveSegment,
+  videoId
 }: VideoTimelineEditorProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -24,6 +26,41 @@ const VideoTimelineEditor = ({
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
   const [mode, setMode] = useState<"cut" | "remove">("cut");
+  
+  const localStorageKey = videoId ? `timeline_${videoId}` : null;
+
+  // Load markers from localStorage
+  useEffect(() => {
+    if (!localStorageKey) return;
+    
+    try {
+      const savedData = localStorage.getItem(localStorageKey);
+      if (savedData) {
+        const data = JSON.parse(savedData);
+        if (data.markers && Array.isArray(data.markers)) {
+          // Filter out any markers that are outside the video duration
+          const validMarkers = data.markers.filter(
+            (marker: number) => marker >= 0 && marker <= videoDuration
+          );
+          setMarkers(validMarkers);
+        }
+      }
+    } catch (error) {
+      console.error("Error loading timeline data from localStorage:", error);
+    }
+  }, [localStorageKey, videoDuration]);
+
+  // Save markers to localStorage whenever they change
+  useEffect(() => {
+    if (!localStorageKey) return;
+    
+    try {
+      const dataToSave = { markers };
+      localStorage.setItem(localStorageKey, JSON.stringify(dataToSave));
+    } catch (error) {
+      console.error("Error saving timeline data to localStorage:", error);
+    }
+  }, [markers, localStorageKey]);
 
   useEffect(() => {
     const video = videoRef.current;

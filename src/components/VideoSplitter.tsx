@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +35,39 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
   const [remainingDuration, setRemainingDuration] = useState<number>(videoDuration);
   const [processedVideoFile, setProcessedVideoFile] = useState<File | null>(null);
   const [selectedSegment, setSelectedSegment] = useState<string | null>(null);
+  
+  // Generate a unique ID for this video to use with localStorage
+  const videoId = React.useMemo(() => {
+    // Use file name and size as part of the ID to make it unique
+    return `video_${videoFile.name.replace(/\W/g, '_')}_${videoFile.size}`;
+  }, [videoFile]);
+
+  // Load segments from localStorage on component mount
+  useEffect(() => {
+    try {
+      const savedSegments = localStorage.getItem(`segments_${videoId}`);
+      if (savedSegments) {
+        const parsedSegments = JSON.parse(savedSegments);
+        if (Array.isArray(parsedSegments) && parsedSegments.length > 0) {
+          setSegments(parsedSegments);
+          setSplitComplete(true);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load segments from localStorage:", error);
+    }
+  }, [videoId]);
+
+  // Save segments to localStorage whenever they change
+  useEffect(() => {
+    if (segments.length > 0) {
+      try {
+        localStorage.setItem(`segments_${videoId}`, JSON.stringify(segments));
+      } catch (error) {
+        console.error("Failed to save segments to localStorage:", error);
+      }
+    }
+  }, [segments, videoId]);
 
   const handleSplitVideo = () => {
     if (numSegments < 2) {
@@ -321,12 +354,14 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               videoDuration={videoDuration}
               onCutSegment={handleCutSegment}
               onRemoveSegment={handleRemoveSegment}
+              videoId={videoId}
             />
           ) : editorMode === "multi" ? (
             <MultiSplitEditor
               videoUrl={currentVideoUrl}
               videoDuration={videoDuration}
               onSplitApply={handleMultiSplit}
+              videoId={videoId}
             />
           ) : (
             <div className="p-6 border rounded-lg bg-card">
@@ -422,6 +457,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                   setEditedVideoUrl(null);
                   setProcessedVideoFile(null);
                   setSelectedSegment(null);
+                  // Clear localStorage segments
+                  localStorage.removeItem(`segments_${videoId}`);
                 }}
                 variant="outline"
               >
