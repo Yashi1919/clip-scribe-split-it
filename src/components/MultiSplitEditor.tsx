@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -215,7 +216,7 @@ const MultiSplitEditor = ({ videoUrl, videoDuration, onSplitApply, videoId }: Mu
               id="numSplits"
               type="number"
               min={1}
-              max={20}
+              max={500}
               value={numSplits}
               onChange={(e) => setNumSplits(parseInt(e.target.value) || 1)}
               className="max-w-[150px]"
@@ -223,6 +224,11 @@ const MultiSplitEditor = ({ videoUrl, videoDuration, onSplitApply, videoId }: Mu
             <p className="text-sm text-muted-foreground">
               This will create {numSplits + 1} equal video segments
             </p>
+            {numSplits > 100 && (
+              <p className="text-sm text-amber-600">
+                ⚠️ Large number of segments may take longer to process
+              </p>
+            )}
           </div>
         </div>
 
