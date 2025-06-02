@@ -39,9 +39,24 @@ const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
   };
 
   const processFile = (file: File) => {
-    // Check if the file is a video
-    if (!file.type.startsWith("video/")) {
-      toast.error("Please upload a video file");
+    // Check if the file is a video (including MKV)
+    const supportedVideoTypes = [
+      'video/mp4',
+      'video/webm',
+      'video/ogg',
+      'video/avi',
+      'video/mov',
+      'video/quicktime',
+      'video/x-msvideo',
+      'video/x-matroska' // MKV format
+    ];
+
+    const isSupportedVideo = file.type.startsWith("video/") || 
+                           supportedVideoTypes.includes(file.type) ||
+                           file.name.toLowerCase().endsWith('.mkv');
+
+    if (!isSupportedVideo) {
+      toast.error("Please upload a video file (MP4, MOV, AVI, WebM, MKV)");
       return;
     }
 
@@ -89,7 +104,7 @@ const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
             <div>
               <p className="text-lg font-medium">Drag & drop your video here</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Or click to browse (MP4, MOV, AVI)
+                Or click to browse (MP4, MOV, AVI, WebM, MKV)
               </p>
             </div>
             <Button onClick={triggerFileInput} variant="outline" className="mt-2">
@@ -99,7 +114,7 @@ const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
               type="file"
               ref={fileInputRef}
               onChange={handleFileSelect}
-              accept="video/*"
+              accept="video/*,.mkv"
               className="hidden"
             />
           </div>
