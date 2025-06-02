@@ -1,4 +1,3 @@
-
 /**
  * VideoProcessor utility for handling video editing operations
  */
@@ -8,11 +7,13 @@
  * 
  * @param sourceVideo The original video file
  * @param segmentToRemove Object containing start and end times of segment to remove
+ * @param mimeType The desired output format
  * @returns Promise resolving to a Blob of the processed video
  */
 export const removeVideoSegment = async (
   sourceVideo: File,
-  segmentToRemove: { startTime: number; endTime: number }
+  segmentToRemove: { startTime: number; endTime: number },
+  mimeType: string = 'video/webm'
 ): Promise<Blob> => {
   // In a browser environment without server-side processing,
   // we need a client-side approach to video editing
@@ -24,7 +25,8 @@ export const removeVideoSegment = async (
     const firstSegment = await createVideoSegment(
       sourceVideo,
       0,
-      segmentToRemove.startTime
+      segmentToRemove.startTime,
+      mimeType
     );
     segments.push(firstSegment);
   }
@@ -37,7 +39,8 @@ export const removeVideoSegment = async (
     const lastSegment = await createVideoSegment(
       sourceVideo,
       segmentToRemove.endTime,
-      videoDuration
+      videoDuration,
+      mimeType
     );
     segments.push(lastSegment);
   }
@@ -48,7 +51,7 @@ export const removeVideoSegment = async (
   } else if (segments.length > 1) {
     // This is a simplified approach - in a real implementation,
     // we would use a more robust method to combine video segments
-    return new Blob(segments, { type: 'video/webm' });
+    return new Blob(segments, { type: mimeType });
   }
   
   throw new Error("Could not process video segments");
@@ -61,7 +64,8 @@ export const removeVideoSegment = async (
 export const createVideoSegment = async (
   sourceVideo: File,
   startTime: number,
-  endTime: number
+  endTime: number,
+  mimeType: string = 'video/webm'
 ): Promise<Blob> => {
   // Create a video element to play the source video
   const video = document.createElement('video');
@@ -89,7 +93,7 @@ export const createVideoSegment = async (
 
   // Create a media recorder to record the stream
   const mediaRecorder = new MediaRecorder(stream, {
-    mimeType: 'video/webm',
+    mimeType: mimeType,
   });
 
   // Store the recorded chunks
@@ -127,7 +131,7 @@ export const createVideoSegment = async (
   // Return a promise that resolves with the recorded video blob
   return new Promise((resolve) => {
     mediaRecorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
+      const blob = new Blob(chunks, { type: mimeType });
       resolve(blob);
     };
   });

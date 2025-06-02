@@ -1,11 +1,11 @@
-
 /**
  * Creates a download URL for a video segment from a source video
  */
 export const createVideoSegment = async (
   sourceVideo: File,
   startTime: number,
-  endTime: number
+  endTime: number,
+  mimeType: string = 'video/webm'
 ): Promise<Blob> => {
   // This is a simplified implementation that uses MediaRecorder to create a new video
   // In a production app, you'd likely want to use a more robust library like FFmpeg.js
@@ -34,9 +34,9 @@ export const createVideoSegment = async (
   // Create a media stream from the canvas
   const stream = canvas.captureStream();
 
-  // Create a media recorder to record the stream
+  // Create a media recorder to record the stream with specified format
   const mediaRecorder = new MediaRecorder(stream, {
-    mimeType: 'video/webm',
+    mimeType: mimeType,
   });
 
   // Store the recorded chunks
@@ -74,7 +74,7 @@ export const createVideoSegment = async (
   // Return a promise that resolves with the recorded video blob
   return new Promise((resolve) => {
     mediaRecorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
+      const blob = new Blob(chunks, { type: mimeType });
       resolve(blob);
     };
   });

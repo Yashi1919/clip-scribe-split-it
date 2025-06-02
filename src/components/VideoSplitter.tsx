@@ -3,12 +3,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Download, Scissors, Plus, Trash } from "lucide-react";
+import { Download, Scissors, Plus, Trash, Archive, Settings } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import VideoSegment from "./VideoSegment";
 import VideoTimelineEditor from "./VideoTimelineEditor";
 import MultiSplitEditor from "./MultiSplitEditor";
 import { createVideoSegment, downloadFile, formatTime } from "@/lib/videoUtils";
 import { removeVideoSegment } from "@/lib/VideoProcessor";
+import { generateOutputFileName } from "@/lib/formatUtils";
+import { createZipFromBlobs, downloadZip, VIDEO_FORMATS, getSupportedFormats, VideoFormat } from "@/lib/downloadUtils";
 
 interface VideoSplitterProps {
   videoFile: File;
@@ -35,6 +39,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
   const [remainingDuration, setRemainingDuration] = useState<number>(videoDuration);
   const [processedVideoFile, setProcessedVideoFile] = useState<File | null>(null);
   const [selectedSegment, setSelectedSegment] = useState<string | null>(null);
+  const [selectedFormat, setSelectedFormat] = useState<VideoFormat>('webm');
+  const [supportedFormats] = useState<VideoFormat[]>(getSupportedFormats());
   
   // Generate a unique ID for this video to use with localStorage
   const videoId = React.useMemo(() => {
@@ -236,19 +242,23 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     try {
       toast.info("Preparing segment for download...");
       
+      const formatConfig = VIDEO_FORMATS[selectedFormat];
       const blob = await createVideoSegment(
         videoFile,
         segment.startTime,
-        segment.endTime
+        segment.endTime,
+        formatConfig.mimeType
       );
       
-      // Generate a filename based on the original filename and segment index
-      const originalName = videoFile.name.replace(/\.[^/.]+$/, ""); // Remove extension
-      const fileName = `${originalName}-part${index + 1}.webm`;
+      const fileName = generateOutputFileName(
+        videoFile.name,
+        `part${index + 1}`,
+        formatConfig.extension
+      );
       
       downloadFile(blob, fileName);
       
-      toast.success(`Segment ${index + 1} downloaded`);
+      toast.success(`Segment ${index + 1} downloaded as ${formatConfig.name}`);
     } catch (error) {
       console.error("Error downloading segment:", error);
       toast.error("Failed to download segment");
@@ -261,11 +271,11 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
       return;
     }
 
-    toast.info(`Preparing ${segments.length} segments for download...`);
+    const cutSegments = segments.filter(segment => segment.type !== "remove");
+    toast.info(`Preparing ${cutSegments.length} segments for download...`);
     
     try {
-      // Process segments sequentially to avoid memory issues
-      const cutSegments = segments.filter(segment => segment.type !== "remove");
+      const formatConfig = VIDEO_FORMATS[selectedFormat];
       
       for (let i = 0; i < cutSegments.length; i++) {
         const segment = cutSegments[i];
@@ -275,19 +285,72 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
         const blob = await createVideoSegment(
           videoFile,
           segment.startTime,
-          segment.endTime
+          segment.endTime,
+          formatConfig.mimeType
         );
         
-        const originalName = videoFile.name.replace(/\.[^/.]+$/, "");
-        const fileName = `${originalName}-part${i + 1}.webm`;
+        const fileName = generateOutputFileName(
+          videoFile.name,
+          `part${i + 1}`,
+          formatConfig.extension
+        );
         
         downloadFile(blob, fileName);
       }
       
-      toast.success("All segments downloaded");
+      toast.success(`All segments downloaded as ${formatConfig.name}`);
     } catch (error) {
       console.error("Error downloading segments:", error);
       toast.error("Failed to download all segments");
+    }
+  };
+
+  const handleDownloadAsZip = async () => {
+    if (segments.length === 0) {
+      toast.error("No segments to download");
+      return;
+    }
+
+    const cutSegments = segments.filter(segment => segment.type !== "remove");
+    toast.info(`Creating ZIP archive with ${cutSegments.length} segments...`);
+    
+    try {
+      const formatConfig = VIDEO_FORMATS[selectedFormat];
+      const files: { name: string; blob: Blob }[] = [];
+      
+      for (let i = 0; i < cutSegments.length; i++) {
+        const segment = cutSegments[i];
+        
+        toast.info(`Processing segment ${i + 1}/${cutSegments.length} for ZIP...`);
+        
+        const blob = await createVideoSegment(
+          videoFile,
+          segment.startTime,
+          segment.endTime,
+          formatConfig.mimeType
+        );
+        
+        const fileName = generateOutputFileName(
+          videoFile.name,
+          `part${i + 1}`,
+          formatConfig.extension
+        );
+        
+        files.push({ name: fileName, blob });
+      }
+      
+      // For now, we'll download files individually as a true ZIP implementation 
+      // would require a library like JSZip
+      toast.info("Downloading segments individually (ZIP coming soon)...");
+      
+      files.forEach(file => {
+        downloadFile(file.blob, file.name);
+      });
+      
+      toast.success(`${files.length} segments downloaded!`);
+    } catch (error) {
+      console.error("Error creating ZIP:", error);
+      toast.error("Failed to create ZIP archive");
     }
   };
 
@@ -298,10 +361,13 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     }
 
     try {
-      const originalName = videoFile.name.replace(/\.[^/.]+$/, "");
-      const fileName = `${originalName}-processed.webm`;
+      const formatConfig = VIDEO_FORMATS[selectedFormat];
+      const fileName = generateOutputFileName(
+        videoFile.name,
+        "processed",
+        formatConfig.extension
+      );
       
-      // Create a blob from the processed file
       const blob = new Blob([processedVideoFile], { type: processedVideoFile.type });
       
       downloadFile(blob, fileName);
@@ -457,7 +523,6 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                   setEditedVideoUrl(null);
                   setProcessedVideoFile(null);
                   setSelectedSegment(null);
-                  // Clear localStorage segments
                   localStorage.removeItem(`segments_${videoId}`);
                 }}
                 variant="outline"
@@ -466,29 +531,60 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               </Button>
               
               <Button 
-                onClick={() => {
-                  setSplitComplete(false);
-                }}
+                onClick={() => setSplitComplete(false)}
                 variant="secondary"
               >
                 <Plus className="mr-2 h-4 w-4" />
                 Add More Segments
               </Button>
-              
+            </div>
+          </div>
+
+          {/* Format Selection and Download Options */}
+          <div className="p-4 border rounded-lg bg-secondary/20">
+            <div className="flex flex-wrap items-center gap-4 mb-4">
+              <div className="flex items-center gap-2">
+                <Settings className="h-4 w-4" />
+                <Label htmlFor="format-select" className="text-sm font-medium">Export Format:</Label>
+                <Select value={selectedFormat} onValueChange={(value: VideoFormat) => setSelectedFormat(value)}>
+                  <SelectTrigger className="w-24" id="format-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {supportedFormats.map((format) => (
+                      <SelectItem key={format} value={format}>
+                        {VIDEO_FORMATS[format].name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
               <Button
                 onClick={handleDownloadAll}
                 disabled={segments.length === 0 || isProcessing}
                 variant="default"
               >
                 <Download className="mr-2 h-4 w-4" />
-                Download Segments ({segments.filter(s => s.type !== "remove").length})
+                Download All ({segments.filter(s => s.type !== "remove").length})
+              </Button>
+              
+              <Button
+                onClick={handleDownloadAsZip}
+                disabled={segments.length === 0 || isProcessing}
+                variant="secondary"
+              >
+                <Archive className="mr-2 h-4 w-4" />
+                Download as ZIP
               </Button>
               
               {editedVideoUrl && (
                 <Button
                   onClick={handleDownloadProcessed}
                   disabled={isProcessing}
-                  variant="secondary"
+                  variant="outline"
                 >
                   <Download className="mr-2 h-4 w-4" />
                   Download Processed Video
