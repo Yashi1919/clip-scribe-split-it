@@ -81,9 +81,14 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
       return;
     }
 
-    if (numSegments > 20) {
-      toast.error("Maximum 20 segments allowed");
+    if (numSegments > 500) {
+      toast.error("Maximum 500 segments allowed");
       return;
+    }
+
+    // Warning for very large numbers of segments
+    if (numSegments > 100) {
+      toast.warning(`Creating ${numSegments} segments may take longer to process`);
     }
 
     setIsProcessing(true);
@@ -440,7 +445,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                       id="numSegments"
                       type="number"
                       min={2}
-                      max={20}
+                      max={500}
                       value={numSegments}
                       onChange={(e) => setNumSegments(parseInt(e.target.value) || 2)}
                       className="max-w-[150px]"
@@ -448,6 +453,11 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                     <p className="text-sm text-muted-foreground">
                       Each segment will be approximately {(videoDuration / numSegments).toFixed(1)} seconds
                     </p>
+                    {numSegments > 100 && (
+                      <p className="text-sm text-amber-600">
+                        ⚠️ Large number of segments may take longer to process
+                      </p>
+                    )}
                   </div>
                   
                   <Button 
