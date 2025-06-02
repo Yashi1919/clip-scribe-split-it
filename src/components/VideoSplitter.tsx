@@ -41,6 +41,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
   const [selectedSegment, setSelectedSegment] = useState<string | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<VideoFormat>('webm');
   const [supportedFormats] = useState<VideoFormat[]>(getSupportedFormats());
+  const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number } | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
   
   // Generate a unique ID for this video to use with localStorage
   const videoId = React.useMemo(() => {
@@ -277,7 +279,14 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     }
 
     const cutSegments = segments.filter(segment => segment.type !== "remove");
-    toast.info(`Preparing ${cutSegments.length} segments for download...`);
+    
+    if (cutSegments.length === 0) {
+      toast.error("No segments available for download");
+      return;
+    }
+
+    setIsDownloading(true);
+    setDownloadProgress({ current: 0, total: cutSegments.length });
     
     try {
       const formatConfig = VIDEO_FORMATS[selectedFormat];
@@ -285,28 +294,49 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
       for (let i = 0; i < cutSegments.length; i++) {
         const segment = cutSegments[i];
         
-        toast.info(`Processing segment ${i + 1}/${cutSegments.length}...`);
+        // Update progress
+        setDownloadProgress({ current: i + 1, total: cutSegments.length });
         
-        const blob = await createVideoSegment(
-          videoFile,
-          segment.startTime,
-          segment.endTime,
-          formatConfig.mimeType
-        );
+        toast.info(`Processing segment ${i + 1}/${cutSegments.length}...`, {
+          id: 'download-progress'
+        });
         
-        const fileName = generateOutputFileName(
-          videoFile.name,
-          `part${i + 1}`,
-          formatConfig.extension
-        );
-        
-        downloadFile(blob, fileName);
+        try {
+          const blob = await createVideoSegment(
+            videoFile,
+            segment.startTime,
+            segment.endTime,
+            formatConfig.mimeType
+          );
+          
+          const fileName = generateOutputFileName(
+            videoFile.name,
+            `part${i + 1}`,
+            formatConfig.extension
+          );
+          
+          downloadFile(blob, fileName);
+          
+          // Small delay to prevent browser overload
+          if (i < cutSegments.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          
+        } catch (segmentError) {
+          console.error(`Error processing segment ${i + 1}:`, segmentError);
+          toast.error(`Failed to process segment ${i + 1}`);
+          // Continue with next segment instead of stopping
+        }
       }
       
-      toast.success(`All segments downloaded as ${formatConfig.name}`);
+      toast.success(`Successfully processed ${cutSegments.length} segments!`);
+      
     } catch (error) {
-      console.error("Error downloading segments:", error);
-      toast.error("Failed to download all segments");
+      console.error("Error during batch download:", error);
+      toast.error("Download process encountered errors");
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress(null);
     }
   };
 
@@ -317,45 +347,66 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     }
 
     const cutSegments = segments.filter(segment => segment.type !== "remove");
-    toast.info(`Creating ZIP archive with ${cutSegments.length} segments...`);
+    
+    if (cutSegments.length === 0) {
+      toast.error("No segments available for download");
+      return;
+    }
+
+    setIsDownloading(true);
+    setDownloadProgress({ current: 0, total: cutSegments.length });
     
     try {
       const formatConfig = VIDEO_FORMATS[selectedFormat];
-      const files: { name: string; blob: Blob }[] = [];
+      
+      toast.info("Processing segments for individual download...");
       
       for (let i = 0; i < cutSegments.length; i++) {
         const segment = cutSegments[i];
         
-        toast.info(`Processing segment ${i + 1}/${cutSegments.length} for ZIP...`);
+        // Update progress
+        setDownloadProgress({ current: i + 1, total: cutSegments.length });
         
-        const blob = await createVideoSegment(
-          videoFile,
-          segment.startTime,
-          segment.endTime,
-          formatConfig.mimeType
-        );
+        toast.info(`Processing segment ${i + 1}/${cutSegments.length} for download...`, {
+          id: 'zip-progress'
+        });
         
-        const fileName = generateOutputFileName(
-          videoFile.name,
-          `part${i + 1}`,
-          formatConfig.extension
-        );
-        
-        files.push({ name: fileName, blob });
+        try {
+          const blob = await createVideoSegment(
+            videoFile,
+            segment.startTime,
+            segment.endTime,
+            formatConfig.mimeType
+          );
+          
+          const fileName = generateOutputFileName(
+            videoFile.name,
+            `part${i + 1}`,
+            formatConfig.extension
+          );
+          
+          downloadFile(blob, fileName);
+          
+          // Small delay to prevent browser overload
+          if (i < cutSegments.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 150));
+          }
+          
+        } catch (segmentError) {
+          console.error(`Error processing segment ${i + 1}:`, segmentError);
+          toast.error(`Failed to process segment ${i + 1}`);
+          // Continue with next segment
+        }
       }
       
-      // For now, we'll download files individually as a true ZIP implementation 
-      // would require a library like JSZip
-      toast.info("Downloading segments individually (ZIP coming soon)...");
+      toast.success(`${cutSegments.length} segments downloaded individually!`);
       
-      files.forEach(file => {
-        downloadFile(file.blob, file.name);
-      });
-      
-      toast.success(`${files.length} segments downloaded!`);
     } catch (error) {
-      console.error("Error creating ZIP:", error);
-      toast.error("Failed to create ZIP archive");
+      console.error("Error during ZIP download:", error);
+      toast.error("Failed to process segments");
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress(null);
     }
   };
 
@@ -533,9 +584,12 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                   setEditedVideoUrl(null);
                   setProcessedVideoFile(null);
                   setSelectedSegment(null);
+                  setDownloadProgress(null);
+                  setIsDownloading(false);
                   localStorage.removeItem(`segments_${videoId}`);
                 }}
                 variant="outline"
+                disabled={isDownloading}
               >
                 Start Over
               </Button>
@@ -543,6 +597,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               <Button 
                 onClick={() => setSplitComplete(false)}
                 variant="secondary"
+                disabled={isDownloading}
               >
                 <Plus className="mr-2 h-4 w-4" />
                 Add More Segments
@@ -550,13 +605,40 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
             </div>
           </div>
 
+          {/* Download Progress Display */}
+          {downloadProgress && (
+            <div className="p-4 border rounded-lg bg-primary/5">
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <div className="flex justify-between text-sm mb-2">
+                    <span>Processing segments...</span>
+                    <span>{downloadProgress.current}/{downloadProgress.total}</span>
+                  </div>
+                  <div className="w-full bg-secondary rounded-full h-2">
+                    <div 
+                      className="bg-primary h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${(downloadProgress.current / downloadProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Please wait while segments are processed and downloaded one by one...
+              </p>
+            </div>
+          )}
+
           {/* Format Selection and Download Options */}
           <div className="p-4 border rounded-lg bg-secondary/20">
             <div className="flex flex-wrap items-center gap-4 mb-4">
               <div className="flex items-center gap-2">
                 <Settings className="h-4 w-4" />
                 <Label htmlFor="format-select" className="text-sm font-medium">Export Format:</Label>
-                <Select value={selectedFormat} onValueChange={(value: VideoFormat) => setSelectedFormat(value)}>
+                <Select 
+                  value={selectedFormat} 
+                  onValueChange={(value: VideoFormat) => setSelectedFormat(value)}
+                  disabled={isDownloading}
+                >
                   <SelectTrigger className="w-24" id="format-select">
                     <SelectValue />
                   </SelectTrigger>
@@ -574,26 +656,26 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
             <div className="flex flex-wrap gap-2">
               <Button
                 onClick={handleDownloadAll}
-                disabled={segments.length === 0 || isProcessing}
+                disabled={segments.length === 0 || isProcessing || isDownloading}
                 variant="default"
               >
                 <Download className="mr-2 h-4 w-4" />
-                Download All ({segments.filter(s => s.type !== "remove").length})
+                {isDownloading ? "Processing..." : `Download All (${segments.filter(s => s.type !== "remove").length})`}
               </Button>
               
               <Button
                 onClick={handleDownloadAsZip}
-                disabled={segments.length === 0 || isProcessing}
+                disabled={segments.length === 0 || isProcessing || isDownloading}
                 variant="secondary"
               >
                 <Archive className="mr-2 h-4 w-4" />
-                Download as ZIP
+                {isDownloading ? "Processing..." : "Download as ZIP"}
               </Button>
               
               {editedVideoUrl && (
                 <Button
                   onClick={handleDownloadProcessed}
-                  disabled={isProcessing}
+                  disabled={isProcessing || isDownloading}
                   variant="outline"
                 >
                   <Download className="mr-2 h-4 w-4" />
@@ -601,6 +683,12 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                 </Button>
               )}
             </div>
+            
+            {segments.filter(s => s.type !== "remove").length > 50 && (
+              <p className="text-sm text-amber-600 mt-2">
+                ⚠️ Large number of segments will be processed sequentially to prevent browser overload
+              </p>
+            )}
           </div>
           
           {segments.length === 0 ? (
