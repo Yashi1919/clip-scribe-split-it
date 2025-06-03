@@ -13,7 +13,7 @@ import { createVideoSegment, downloadFile, formatTime } from "@/lib/videoUtils";
 import { removeVideoSegment } from "@/lib/VideoProcessor";
 import { generateOutputFileName } from "@/lib/formatUtils";
 import { createZipFromBlobs, downloadZip, VIDEO_FORMATS, getSupportedFormats, VideoFormat } from "@/lib/downloadUtils";
-import { FastVideoProcessor, processBatchedSegments, streamingDownload } from "@/lib/fastVideoProcessor";
+import { FastVideoProcessor, streamingDownload } from "@/lib/fastVideoProcessor";
 
 interface VideoSplitterProps {
   videoFile: File;
@@ -351,8 +351,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
       const formatConfig = VIDEO_FORMATS[selectedFormat];
       
       if (processor) {
-        // Use high-speed parallel processing
-        toast.info("Using high-speed parallel processing...");
+        // Use high-speed parallel processing with automatic downloads
+        toast.info("🚀 Starting lightning-fast processing with automatic downloads...");
         
         const segmentJobs = cutSegments.map((segment, index) => ({
           id: segment.id,
@@ -361,23 +361,22 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
           index
         }));
         
-        await processBatchedSegments(
-          processor,
+        await processor.processAndDownloadSegments(
           segmentJobs,
-          Math.min(10, Math.max(2, Math.floor(cutSegments.length / 20))), // Dynamic batch size
           formatConfig.extension,
+          videoFile.name,
           (completed, total) => {
             setDownloadProgress({ current: completed, total });
-            toast.info(`Processing: ${completed}/${total} segments`, {
+            toast.info(`⚡ Auto-downloading: ${completed}/${total} segments`, {
               id: 'fast-download-progress'
             });
           },
-          (segmentId, data, filename) => {
-            console.log(`Segment ${filename} completed and downloaded`);
+          (segmentId, filename) => {
+            console.log(`Segment ${filename} processed and auto-downloaded`);
           }
         );
         
-        toast.success(`⚡ Lightning-fast processing completed! ${cutSegments.length} segments downloaded!`);
+        toast.success(`⚡ Lightning-fast processing completed! ${cutSegments.length} segments automatically downloaded!`);
       } else {
         // Fallback to original method with warnings
         toast.warning("Using slower fallback method. Fast processor not available.");
@@ -387,7 +386,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
           
           setDownloadProgress({ current: i + 1, total: cutSegments.length });
           
-          toast.info(`Processing segment ${i + 1}/${cutSegments.length}...`, {
+          toast.info(`Processing and downloading segment ${i + 1}/${cutSegments.length}...`, {
             id: 'download-progress'
           });
           
@@ -417,7 +416,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
           }
         }
         
-        toast.success(`Successfully processed ${cutSegments.length} segments!`);
+        toast.success(`Successfully processed and downloaded ${cutSegments.length} segments!`);
       }
       
     } catch (error) {
@@ -700,7 +699,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               <div className="flex items-center gap-4">
                 <div className="flex-1">
                   <div className="flex justify-between text-sm mb-2">
-                    <span>Processing segments...</span>
+                    <span>Processing and auto-downloading...</span>
                     <span>{downloadProgress.current}/{downloadProgress.total}</span>
                   </div>
                   <div className="w-full bg-secondary rounded-full h-2">
@@ -712,7 +711,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                 </div>
               </div>
               <p className="text-xs text-muted-foreground mt-2">
-                Please wait while segments are processed and downloaded one by one...
+                ⚡ Each segment is automatically downloaded as soon as it's processed!
               </p>
             </div>
           )}
@@ -744,7 +743,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               {processor && (
                 <div className="flex items-center gap-2 text-green-600">
                   <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                  <span className="text-xs font-medium">⚡ Fast Processor Ready</span>
+                  <span className="text-xs font-medium">⚡ Auto-Download Ready</span>
                 </div>
               )}
               
@@ -763,7 +762,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                 variant="default"
               >
                 <Download className="mr-2 h-4 w-4" />
-                {isDownloading ? "Processing..." : `${processor ? "⚡ Fast" : "🐌 Slow"} Download All (${segments.filter(s => s.type !== "remove").length})`}
+                {isDownloading ? "Auto-downloading..." : `${processor ? "⚡ Process & Auto-Download" : "🐌 Slow Download"} All (${segments.filter(s => s.type !== "remove").length})`}
               </Button>
               
               <Button
@@ -789,13 +788,13 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
             
             {processor && segments.filter(s => s.type !== "remove").length > 50 && (
               <p className="text-sm text-green-600 mt-2">
-                ⚡ Fast parallel processing will handle large batches efficiently!
+                ⚡ Auto-download mode: Each segment downloads immediately after processing!
               </p>
             )}
             
             {!processor && segments.filter(s => s.type !== "remove").length > 50 && (
               <p className="text-sm text-amber-600 mt-2">
-                ⚠️ Large number of segments - fast processor initialization failed, using slower method
+                ⚠️ Large number of segments - fast processor unavailable, using slower method
               </p>
             )}
           </div>

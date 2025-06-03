@@ -127,6 +127,97 @@ export class FastVideoProcessor {
       }, 100);
     });
   }
+
+  /**
+   * Process segments with automatic downloads as each completes
+   */
+  async processAndDownloadSegments(
+    segments: SegmentJob[],
+    outputFormat: string = 'mp4',
+    videoFileName: string,
+    onProgress?: (completed: number, total: number) => void,
+    onSegmentDownloaded?: (segmentId: string, filename: string) => void
+  ): Promise<void> {
+    if (!this.videoData) {
+      throw new Error('Video processor not initialized');
+    }
+    
+    let completed = 0;
+    
+    return new Promise((resolve, reject) => {
+      const processNext = () => {
+        if (this.processingQueue.length === 0 && this.activeJobs.size === 0) {
+          resolve();
+          return;
+        }
+        
+        while (this.availableWorkers.length > 0 && this.processingQueue.length > 0) {
+          const worker = this.availableWorkers.pop()!;
+          const job = this.processingQueue.shift()!;
+          
+          const jobPromise = new Promise<ArrayBuffer>((resolveJob, rejectJob) => {
+            this.activeJobs.set(job.id, { worker, resolve: resolveJob, reject: rejectJob });
+            
+            worker.postMessage({
+              type: 'processSegment',
+              data: {
+                videoData: this.videoData,
+                startTime: job.startTime,
+                endTime: job.endTime,
+                outputFormat,
+                segmentId: job.id
+              }
+            });
+          });
+          
+          jobPromise.then((data) => {
+            // Immediately download the segment
+            const blob = new Blob([data], { type: `video/${outputFormat}` });
+            const filename = this.generateSegmentFilename(videoFileName, job.index, outputFormat);
+            this.streamingDownload(blob, filename);
+            
+            completed++;
+            onProgress?.(completed, segments.length);
+            onSegmentDownloaded?.(job.id, filename);
+          }).catch(reject);
+        }
+      };
+      
+      this.processingQueue = [...segments];
+      processNext();
+      
+      // Set up interval to check for available workers
+      const checkInterval = setInterval(() => {
+        if (this.availableWorkers.length > 0 && this.processingQueue.length > 0) {
+          processNext();
+        }
+        if (this.processingQueue.length === 0 && this.activeJobs.size === 0) {
+          clearInterval(checkInterval);
+        }
+      }, 100);
+    });
+  }
+
+  private generateSegmentFilename(videoFileName: string, index: number, format: string): string {
+    const baseName = videoFileName.replace(/\.[^/.]+$/, "");
+    return `${baseName}_part${index + 1}.${format}`;
+  }
+
+  private streamingDownload(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    
+    // Clean up immediately to free memory
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+  }
   
   private handleWorkerMessage(e: MessageEvent, worker: Worker) {
     const { type, segmentId, data, error } = e.data;
