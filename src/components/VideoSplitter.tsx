@@ -13,6 +13,7 @@ import { createVideoSegment, downloadFile, formatTime } from "@/lib/videoUtils";
 import { removeVideoSegment } from "@/lib/VideoProcessor";
 import { generateOutputFileName } from "@/lib/formatUtils";
 import { createZipFromBlobs, downloadZip, VIDEO_FORMATS, getSupportedFormats, VideoFormat } from "@/lib/downloadUtils";
+import { FastVideoProcessor, processBatchedSegments, streamingDownload } from "@/lib/fastVideoProcessor";
 
 interface VideoSplitterProps {
   videoFile: File;
@@ -43,6 +44,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
   const [supportedFormats] = useState<VideoFormat[]>(getSupportedFormats());
   const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number } | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [processor, setProcessor] = useState<FastVideoProcessor | null>(null);
+  const [isInitializingProcessor, setIsInitializingProcessor] = useState(false);
   
   // Generate a unique ID for this video to use with localStorage
   const videoId = React.useMemo(() => {
@@ -76,6 +79,36 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
       }
     }
   }, [segments, videoId]);
+
+  // Initialize fast processor when video is loaded
+  useEffect(() => {
+    if (videoFile && !processor && !isInitializingProcessor) {
+      setIsInitializingProcessor(true);
+      const newProcessor = new FastVideoProcessor({
+        maxConcurrentWorkers: Math.min(navigator.hardwareConcurrency || 4, 6),
+        useStreamingDownload: true
+      });
+      
+      newProcessor.initialize(videoFile)
+        .then(() => {
+          setProcessor(newProcessor);
+          toast.success("High-speed processor initialized!");
+        })
+        .catch((error) => {
+          console.error("Failed to initialize processor:", error);
+          toast.error("Failed to initialize fast processor, using fallback");
+        })
+        .finally(() => {
+          setIsInitializingProcessor(false);
+        });
+    }
+    
+    return () => {
+      if (processor) {
+        processor.destroy();
+      }
+    };
+  }, [videoFile]);
 
   const handleSplitVideo = () => {
     if (numSegments < 2) {
@@ -250,22 +283,48 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
       toast.info("Preparing segment for download...");
       
       const formatConfig = VIDEO_FORMATS[selectedFormat];
-      const blob = await createVideoSegment(
-        videoFile,
-        segment.startTime,
-        segment.endTime,
-        formatConfig.mimeType
-      );
       
-      const fileName = generateOutputFileName(
-        videoFile.name,
-        `part${index + 1}`,
-        formatConfig.extension
-      );
-      
-      downloadFile(blob, fileName);
-      
-      toast.success(`Segment ${index + 1} downloaded as ${formatConfig.name}`);
+      if (processor) {
+        // Use fast processor
+        const results = await processor.processSegments(
+          [{
+            id: segment.id,
+            startTime: segment.startTime,
+            endTime: segment.endTime,
+            index
+          }],
+          formatConfig.extension
+        );
+        
+        const data = results.get(segment.id);
+        if (data) {
+          const blob = new Blob([data], { type: formatConfig.mimeType });
+          const fileName = generateOutputFileName(
+            videoFile.name,
+            `part${index + 1}`,
+            formatConfig.extension
+          );
+          streamingDownload(blob, fileName);
+          toast.success(`Segment ${index + 1} downloaded using fast processor!`);
+        }
+      } else {
+        // Fallback to original method
+        const blob = await createVideoSegment(
+          videoFile,
+          segment.startTime,
+          segment.endTime,
+          formatConfig.mimeType
+        );
+        
+        const fileName = generateOutputFileName(
+          videoFile.name,
+          `part${index + 1}`,
+          formatConfig.extension
+        );
+        
+        downloadFile(blob, fileName);
+        toast.success(`Segment ${index + 1} downloaded`);
+      }
     } catch (error) {
       console.error("Error downloading segment:", error);
       toast.error("Failed to download segment");
@@ -291,45 +350,75 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     try {
       const formatConfig = VIDEO_FORMATS[selectedFormat];
       
-      for (let i = 0; i < cutSegments.length; i++) {
-        const segment = cutSegments[i];
+      if (processor) {
+        // Use high-speed parallel processing
+        toast.info("Using high-speed parallel processing...");
         
-        // Update progress
-        setDownloadProgress({ current: i + 1, total: cutSegments.length });
+        const segmentJobs = cutSegments.map((segment, index) => ({
+          id: segment.id,
+          startTime: segment.startTime,
+          endTime: segment.endTime,
+          index
+        }));
         
-        toast.info(`Processing segment ${i + 1}/${cutSegments.length}...`, {
-          id: 'download-progress'
-        });
-        
-        try {
-          const blob = await createVideoSegment(
-            videoFile,
-            segment.startTime,
-            segment.endTime,
-            formatConfig.mimeType
-          );
-          
-          const fileName = generateOutputFileName(
-            videoFile.name,
-            `part${i + 1}`,
-            formatConfig.extension
-          );
-          
-          downloadFile(blob, fileName);
-          
-          // Small delay to prevent browser overload
-          if (i < cutSegments.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 100));
+        await processBatchedSegments(
+          processor,
+          segmentJobs,
+          Math.min(10, Math.max(2, Math.floor(cutSegments.length / 20))), // Dynamic batch size
+          formatConfig.extension,
+          (completed, total) => {
+            setDownloadProgress({ current: completed, total });
+            toast.info(`Processing: ${completed}/${total} segments`, {
+              id: 'fast-download-progress'
+            });
+          },
+          (segmentId, data, filename) => {
+            console.log(`Segment ${filename} completed and downloaded`);
           }
+        );
+        
+        toast.success(`⚡ Lightning-fast processing completed! ${cutSegments.length} segments downloaded!`);
+      } else {
+        // Fallback to original method with warnings
+        toast.warning("Using slower fallback method. Fast processor not available.");
+        
+        for (let i = 0; i < cutSegments.length; i++) {
+          const segment = cutSegments[i];
           
-        } catch (segmentError) {
-          console.error(`Error processing segment ${i + 1}:`, segmentError);
-          toast.error(`Failed to process segment ${i + 1}`);
-          // Continue with next segment instead of stopping
+          setDownloadProgress({ current: i + 1, total: cutSegments.length });
+          
+          toast.info(`Processing segment ${i + 1}/${cutSegments.length}...`, {
+            id: 'download-progress'
+          });
+          
+          try {
+            const blob = await createVideoSegment(
+              videoFile,
+              segment.startTime,
+              segment.endTime,
+              formatConfig.mimeType
+            );
+            
+            const fileName = generateOutputFileName(
+              videoFile.name,
+              `part${i + 1}`,
+              formatConfig.extension
+            );
+            
+            downloadFile(blob, fileName);
+            
+            if (i < cutSegments.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+          } catch (segmentError) {
+            console.error(`Error processing segment ${i + 1}:`, segmentError);
+            toast.error(`Failed to process segment ${i + 1}`);
+          }
         }
+        
+        toast.success(`Successfully processed ${cutSegments.length} segments!`);
       }
-      
-      toast.success(`Successfully processed ${cutSegments.length} segments!`);
       
     } catch (error) {
       console.error("Error during batch download:", error);
@@ -628,7 +717,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
             </div>
           )}
 
-          {/* Format Selection and Download Options */}
+          {/* Enhanced Format Selection and Download Options */}
           <div className="p-4 border rounded-lg bg-secondary/20">
             <div className="flex flex-wrap items-center gap-4 mb-4">
               <div className="flex items-center gap-2">
@@ -651,6 +740,20 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                   </SelectContent>
                 </Select>
               </div>
+              
+              {processor && (
+                <div className="flex items-center gap-2 text-green-600">
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                  <span className="text-xs font-medium">⚡ Fast Processor Ready</span>
+                </div>
+              )}
+              
+              {isInitializingProcessor && (
+                <div className="flex items-center gap-2 text-blue-600">
+                  <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+                  <span className="text-xs">Initializing fast processor...</span>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -660,7 +763,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                 variant="default"
               >
                 <Download className="mr-2 h-4 w-4" />
-                {isDownloading ? "Processing..." : `Download All (${segments.filter(s => s.type !== "remove").length})`}
+                {isDownloading ? "Processing..." : `${processor ? "⚡ Fast" : "🐌 Slow"} Download All (${segments.filter(s => s.type !== "remove").length})`}
               </Button>
               
               <Button
@@ -684,9 +787,15 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               )}
             </div>
             
-            {segments.filter(s => s.type !== "remove").length > 50 && (
+            {processor && segments.filter(s => s.type !== "remove").length > 50 && (
+              <p className="text-sm text-green-600 mt-2">
+                ⚡ Fast parallel processing will handle large batches efficiently!
+              </p>
+            )}
+            
+            {!processor && segments.filter(s => s.type !== "remove").length > 50 && (
               <p className="text-sm text-amber-600 mt-2">
-                ⚠️ Large number of segments will be processed sequentially to prevent browser overload
+                ⚠️ Large number of segments - fast processor initialization failed, using slower method
               </p>
             )}
           </div>
