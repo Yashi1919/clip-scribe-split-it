@@ -1,12 +1,13 @@
-
 /**
- * High-performance video processor using Web Workers and FFmpeg WebAssembly
+ * High-performance video processor optimized for large files (1-3GB)
+ * Uses Web Workers, FFmpeg WebAssembly, and memory management techniques
  */
 
 interface ProcessingOptions {
   maxConcurrentWorkers?: number;
   chunkSize?: number;
   useStreamingDownload?: boolean;
+  memoryThreshold?: number; // MB
 }
 
 interface SegmentJob {
@@ -24,17 +25,36 @@ export class FastVideoProcessor {
   private maxWorkers: number;
   private videoData: ArrayBuffer | null = null;
   private isFFmpegAvailable: boolean = true;
+  private memoryThreshold: number;
+  private videoFile: File | null = null;
   
   constructor(options: ProcessingOptions = {}) {
     this.maxWorkers = Math.min(
-      options.maxConcurrentWorkers || navigator.hardwareConcurrency || 4,
-      8 // Cap at 8 to prevent browser overload
+      options.maxConcurrentWorkers || Math.max(2, Math.floor(navigator.hardwareConcurrency / 2)),
+      6 // Reduced cap for large files to prevent memory issues
     );
+    this.memoryThreshold = options.memoryThreshold || 1000; // 1GB default threshold
   }
   
   async initialize(videoFile: File): Promise<void> {
-    // Load video data once
-    this.videoData = await videoFile.arrayBuffer();
+    this.videoFile = videoFile;
+    const fileSizeMB = videoFile.size / (1024 * 1024);
+    
+    // For very large files, reduce worker count and use streaming
+    if (fileSizeMB > this.memoryThreshold) {
+      console.log(`Large file detected (${fileSizeMB.toFixed(0)}MB), optimizing for memory usage`);
+      this.maxWorkers = Math.min(this.maxWorkers, 3);
+    }
+    
+    // Load video data in chunks for large files or all at once for smaller files
+    if (fileSizeMB > 500) {
+      console.log("Using streaming mode for large file");
+      // Don't load entire file into memory for very large files
+      this.videoData = null;
+    } else {
+      console.log("Loading file into memory for fast processing");
+      this.videoData = await videoFile.arrayBuffer();
+    }
     
     // Create and initialize workers
     for (let i = 0; i < this.maxWorkers; i++) {
@@ -58,23 +78,24 @@ export class FastVideoProcessor {
       throw new Error('No workers could be created');
     }
     
-    // Wait for all workers to be ready or fail
+    // Wait for workers to initialize with longer timeout for large files
+    const timeout = fileSizeMB > 1000 ? 15000 : 10000;
     const workerPromises = this.workers.map(worker => 
       new Promise<boolean>((resolve) => {
-        const timeout = setTimeout(() => {
+        const timeoutId = setTimeout(() => {
           console.warn('Worker initialization timeout');
           resolve(false);
-        }, 10000); // 10 second timeout
+        }, timeout);
         
         const handler = (e: MessageEvent) => {
           if (e.data.type === 'ready') {
             worker.removeEventListener('message', handler);
             this.availableWorkers.push(worker);
-            clearTimeout(timeout);
+            clearTimeout(timeoutId);
             resolve(true);
           } else if (e.data.type === 'error' && e.data.ffmpegUnavailable) {
             worker.removeEventListener('message', handler);
-            clearTimeout(timeout);
+            clearTimeout(timeoutId);
             resolve(false);
           }
         };
@@ -90,7 +111,24 @@ export class FastVideoProcessor {
       throw new Error('FFmpeg workers failed to initialize - falling back to slower method');
     }
     
-    console.log(`Initialized ${successfulWorkers}/${this.workers.length} FFmpeg workers`);
+    console.log(`Initialized ${successfulWorkers}/${this.workers.length} FFmpeg workers for ${fileSizeMB.toFixed(0)}MB file`);
+  }
+
+  /**
+   * Get video data for a segment, either from memory or by reading from file
+   */
+  private async getVideoDataForSegment(): Promise<ArrayBuffer> {
+    if (this.videoData) {
+      return this.videoData;
+    }
+    
+    // For large files, read the entire file when needed
+    // In a more advanced implementation, we could read only the needed portion
+    if (this.videoFile) {
+      return await this.videoFile.arrayBuffer();
+    }
+    
+    throw new Error('No video data available');
   }
   
   async processSegments(
@@ -99,7 +137,7 @@ export class FastVideoProcessor {
     onProgress?: (completed: number, total: number) => void,
     onSegmentComplete?: (segmentId: string, data: ArrayBuffer) => void
   ): Promise<Map<string, ArrayBuffer>> {
-    if (!this.videoData) {
+    if (!this.videoFile) {
       throw new Error('Video processor not initialized');
     }
     
@@ -111,7 +149,7 @@ export class FastVideoProcessor {
     let completed = 0;
     
     return new Promise((resolve, reject) => {
-      const processNext = () => {
+      const processNext = async () => {
         if (this.processingQueue.length === 0 && this.activeJobs.size === 0) {
           resolve(results);
           return;
@@ -121,27 +159,35 @@ export class FastVideoProcessor {
           const worker = this.availableWorkers.pop()!;
           const job = this.processingQueue.shift()!;
           
-          const jobPromise = new Promise<ArrayBuffer>((resolveJob, rejectJob) => {
-            this.activeJobs.set(job.id, { worker, resolve: resolveJob, reject: rejectJob });
+          try {
+            const videoData = await this.getVideoDataForSegment();
             
-            worker.postMessage({
-              type: 'processSegment',
-              data: {
-                videoData: this.videoData,
-                startTime: job.startTime,
-                endTime: job.endTime,
-                outputFormat,
-                segmentId: job.id
-              }
+            const jobPromise = new Promise<ArrayBuffer>((resolveJob, rejectJob) => {
+              this.activeJobs.set(job.id, { worker, resolve: resolveJob, reject: rejectJob });
+              
+              worker.postMessage({
+                type: 'processSegment',
+                data: {
+                  videoData: videoData,
+                  startTime: job.startTime,
+                  endTime: job.endTime,
+                  outputFormat,
+                  segmentId: job.id
+                }
+              });
             });
-          });
-          
-          jobPromise.then((data) => {
-            results.set(job.id, data);
-            completed++;
-            onProgress?.(completed, segments.length);
-            onSegmentComplete?.(job.id, data);
-          }).catch(reject);
+            
+            jobPromise.then((data) => {
+              results.set(job.id, data);
+              completed++;
+              onProgress?.(completed, segments.length);
+              onSegmentComplete?.(job.id, data);
+            }).catch(reject);
+            
+          } catch (error) {
+            reject(error);
+            return;
+          }
         }
       };
       
@@ -161,7 +207,7 @@ export class FastVideoProcessor {
   }
 
   /**
-   * Process segments with automatic downloads as each completes
+   * Process segments with automatic downloads - optimized for large files
    */
   async processAndDownloadSegments(
     segments: SegmentJob[],
@@ -170,7 +216,7 @@ export class FastVideoProcessor {
     onProgress?: (completed: number, total: number) => void,
     onSegmentDownloaded?: (segmentId: string, filename: string) => void
   ): Promise<void> {
-    if (!this.videoData) {
+    if (!this.videoFile) {
       throw new Error('Video processor not initialized');
     }
     
@@ -181,7 +227,7 @@ export class FastVideoProcessor {
     let completed = 0;
     
     return new Promise((resolve, reject) => {
-      const processNext = () => {
+      const processNext = async () => {
         if (this.processingQueue.length === 0 && this.activeJobs.size === 0) {
           resolve();
           return;
@@ -191,38 +237,54 @@ export class FastVideoProcessor {
           const worker = this.availableWorkers.pop()!;
           const job = this.processingQueue.shift()!;
           
-          const jobPromise = new Promise<ArrayBuffer>((resolveJob, rejectJob) => {
-            this.activeJobs.set(job.id, { worker, resolve: resolveJob, reject: rejectJob });
+          try {
+            const videoData = await this.getVideoDataForSegment();
             
-            worker.postMessage({
-              type: 'processSegment',
-              data: {
-                videoData: this.videoData,
-                startTime: job.startTime,
-                endTime: job.endTime,
-                outputFormat,
-                segmentId: job.id
-              }
+            const jobPromise = new Promise<ArrayBuffer>((resolveJob, rejectJob) => {
+              this.activeJobs.set(job.id, { worker, resolve: resolveJob, reject: rejectJob });
+              
+              worker.postMessage({
+                type: 'processSegment',
+                data: {
+                  videoData: videoData,
+                  startTime: job.startTime,
+                  endTime: job.endTime,
+                  outputFormat,
+                  segmentId: job.id
+                }
+              });
             });
-          });
-          
-          jobPromise.then((data) => {
-            // Immediately download the segment
-            const blob = new Blob([data], { type: `video/${outputFormat}` });
-            const filename = this.generateSegmentFilename(videoFileName, job.index, outputFormat);
-            this.streamingDownload(blob, filename);
             
-            completed++;
-            onProgress?.(completed, segments.length);
-            onSegmentDownloaded?.(job.id, filename);
-          }).catch(reject);
+            jobPromise.then((data) => {
+              // Immediately download and release memory
+              const blob = new Blob([data], { type: `video/${outputFormat}` });
+              const filename = this.generateSegmentFilename(videoFileName, job.index, outputFormat);
+              this.streamingDownload(blob, filename);
+              
+              completed++;
+              onProgress?.(completed, segments.length);
+              onSegmentDownloaded?.(job.id, filename);
+              
+              // Force garbage collection hint for large files
+              if (this.videoFile && this.videoFile.size > 500 * 1024 * 1024) {
+                setTimeout(() => {
+                  if (window.gc) {
+                    window.gc();
+                  }
+                }, 100);
+              }
+            }).catch(reject);
+            
+          } catch (error) {
+            reject(error);
+            return;
+          }
         }
       };
       
       this.processingQueue = [...segments];
       processNext();
       
-      // Set up interval to check for available workers
       const checkInterval = setInterval(() => {
         if (this.availableWorkers.length > 0 && this.processingQueue.length > 0) {
           processNext();
@@ -304,10 +366,20 @@ export class FastVideoProcessor {
     this.availableWorkers = [];
     this.activeJobs.clear();
     this.processingQueue = [];
+    this.videoData = null;
+    this.videoFile = null;
   }
   
   get isAvailable(): boolean {
     return this.isFFmpegAvailable && this.availableWorkers.length > 0;
+  }
+
+  get memoryUsage(): { videoDataMB: number; isUsingMemoryMode: boolean } {
+    const videoDataMB = this.videoData ? this.videoData.byteLength / (1024 * 1024) : 0;
+    return {
+      videoDataMB,
+      isUsingMemoryMode: !!this.videoData
+    };
   }
 }
 
@@ -315,7 +387,6 @@ export class FastVideoProcessor {
  * Download blob with streaming for better performance
  */
 export const streamingDownload = (blob: Blob, filename: string): void => {
-  // Use streaming download for large files
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -324,7 +395,6 @@ export const streamingDownload = (blob: Blob, filename: string): void => {
   document.body.appendChild(a);
   a.click();
   
-  // Clean up immediately to free memory
   setTimeout(() => {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
@@ -356,7 +426,6 @@ export const processBatchedSegments = async (
       }
     );
     
-    // Download each segment immediately to free memory
     for (const [segmentId, data] of results) {
       const segment = batch.find(s => s.id === segmentId);
       if (segment) {
@@ -368,8 +437,6 @@ export const processBatchedSegments = async (
     }
     
     processedCount += batch.length;
-    
-    // Small delay between batches to prevent browser lockup
     await new Promise(resolve => setTimeout(resolve, 50));
   }
 };

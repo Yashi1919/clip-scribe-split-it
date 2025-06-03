@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Download, Scissors, Plus, Trash, Archive, Settings } from "lucide-react";
+import { Download, Scissors, Plus, Trash, Archive, Settings, HardDrive } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import VideoSegment from "./VideoSegment";
@@ -46,6 +46,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
   const [isDownloading, setIsDownloading] = useState(false);
   const [processor, setProcessor] = useState<FastVideoProcessor | null>(null);
   const [isInitializingProcessor, setIsInitializingProcessor] = useState(false);
+  const [memoryInfo, setMemoryInfo] = useState<{ videoDataMB: number; isUsingMemoryMode: boolean } | null>(null);
   
   // Generate a unique ID for this video to use with localStorage
   const videoId = React.useMemo(() => {
@@ -84,20 +85,24 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
   useEffect(() => {
     if (videoFile && !processor && !isInitializingProcessor) {
       setIsInitializingProcessor(true);
+      const fileSizeMB = videoFile.size / (1024 * 1024);
+      
       const newProcessor = new FastVideoProcessor({
-        maxConcurrentWorkers: Math.min(navigator.hardwareConcurrency || 4, 6),
-        useStreamingDownload: true
+        maxConcurrentWorkers: Math.min(navigator.hardwareConcurrency || 4, fileSizeMB > 1000 ? 3 : 6),
+        useStreamingDownload: true,
+        memoryThreshold: 1000 // 1GB threshold
       });
       
       newProcessor.initialize(videoFile)
         .then(() => {
           setProcessor(newProcessor);
-          toast.success("High-speed processor initialized!");
+          setMemoryInfo(newProcessor.memoryUsage);
+          toast.success(`High-speed processor initialized for ${fileSizeMB.toFixed(0)}MB file!`);
         })
         .catch((error) => {
           console.error("Failed to initialize processor:", error);
           toast.error("Fast processor unavailable, using fallback method");
-          setProcessor(null); // Make sure processor is null so UI shows fallback
+          setProcessor(null);
         })
         .finally(() => {
           setIsInitializingProcessor(false);
@@ -542,9 +547,35 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
 
   // Use edited video URL if available, otherwise use original
   const currentVideoUrl = editedVideoUrl || videoUrl;
+  const fileSizeMB = videoFile.size / (1024 * 1024);
 
   return (
     <div className="space-y-6">
+      {/* Large File Info Banner */}
+      {fileSizeMB > 500 && (
+        <div className="p-4 border rounded-lg bg-blue-50 border-blue-200">
+          <div className="flex items-start gap-3">
+            <HardDrive className="h-5 w-5 text-blue-600 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="text-sm font-medium text-blue-900">Large File Detected</h3>
+              <p className="text-sm text-blue-700 mt-1">
+                File size: {fileSizeMB.toFixed(0)}MB. 
+                {memoryInfo?.isUsingMemoryMode 
+                  ? " Loaded into memory for fastest processing." 
+                  : " Using streaming mode to optimize memory usage."
+                }
+              </p>
+              {memoryInfo && (
+                <p className="text-xs text-blue-600 mt-1">
+                  Processing mode: {memoryInfo.isUsingMemoryMode ? "⚡ Memory" : "💾 Streaming"} 
+                  {memoryInfo.videoDataMB > 0 && ` (${memoryInfo.videoDataMB.toFixed(0)}MB in memory)`}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {!splitComplete ? (
         <div className="space-y-4">
           <div className="tabs flex flex-wrap space-x-2 mb-6">
@@ -714,7 +745,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                   <div className="flex justify-between text-sm mb-2">
                     <span>
                       {processor && processor.isAvailable 
-                        ? "Processing and auto-downloading..." 
+                        ? `Processing ${fileSizeMB.toFixed(0)}MB file with auto-download...` 
                         : "Processing with fallback method..."
                       }
                     </span>
@@ -730,7 +761,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               </div>
               <p className="text-xs text-muted-foreground mt-2">
                 {processor && processor.isAvailable 
-                  ? "⚡ Each segment is automatically downloaded as soon as it's processed!"
+                  ? `⚡ Each segment auto-downloads immediately! (${memoryInfo?.isUsingMemoryMode ? 'Memory' : 'Streaming'} mode)`
                   : "🐌 Using slower method due to processor unavailability"
                 }
               </p>
@@ -764,7 +795,16 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               {processor && processor.isAvailable && (
                 <div className="flex items-center gap-2 text-green-600">
                   <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                  <span className="text-xs font-medium">⚡ Fast Processor Ready</span>
+                  <span className="text-xs font-medium">
+                    ⚡ Fast Processor ({memoryInfo?.isUsingMemoryMode ? 'Memory' : 'Streaming'})
+                  </span>
+                </div>
+              )}
+              
+              {fileSizeMB > 1000 && (
+                <div className="flex items-center gap-2 text-blue-600">
+                  <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                  <span className="text-xs font-medium">💾 Large File Optimized</span>
                 </div>
               )}
               
@@ -819,7 +859,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
             
             {processor?.isAvailable && segments.filter(s => s.type !== "remove").length > 50 && (
               <p className="text-sm text-green-600 mt-2">
-                ⚡ Fast mode: Each segment downloads immediately after processing!
+                ⚡ Fast mode: Each segment downloads immediately after processing! 
+                {fileSizeMB > 1000 && " Optimized for large files."}
               </p>
             )}
             

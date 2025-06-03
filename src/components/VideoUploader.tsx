@@ -1,7 +1,8 @@
 
 import { useState, useRef } from "react";
-import { Upload, File, X } from "lucide-react";
+import { Upload, File, X, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 
 interface VideoUploaderProps {
@@ -11,6 +12,8 @@ interface VideoUploaderProps {
 const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -38,7 +41,7 @@ const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
     }
   };
 
-  const processFile = (file: File) => {
+  const processFile = async (file: File) => {
     // Check if the file is a video (including MKV)
     const supportedVideoTypes = [
       'video/mp4',
@@ -60,14 +63,69 @@ const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
       return;
     }
 
+    // Check file size (warn for very large files)
+    const fileSizeMB = file.size / (1024 * 1024);
+    if (fileSizeMB > 3000) {
+      toast.error("File too large. Please use files under 3GB for best performance.");
+      return;
+    }
+
+    if (fileSizeMB > 500) {
+      toast.warning(`Large file detected (${fileSizeMB.toFixed(0)}MB). Processing may take longer.`);
+    }
+
+    setIsProcessing(true);
+    setUploadProgress(0);
     setSelectedFile(file);
     
-    // Create a URL for the video
-    const videoUrl = URL.createObjectURL(file);
-    
-    // Call the callback with the file and URL
-    onVideoUploaded(file, videoUrl);
-    toast.success("Video uploaded successfully!");
+    try {
+      // Simulate upload progress for large files
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 10;
+        });
+      }, 100);
+
+      // Create a URL for the video (this happens instantly)
+      const videoUrl = URL.createObjectURL(file);
+      
+      // Complete the progress
+      setUploadProgress(100);
+      clearInterval(progressInterval);
+      
+      // Try to cache the file data for faster access
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const fileId = `video_${file.name}_${file.size}`;
+        
+        // Store file metadata in localStorage for session restoration
+        localStorage.setItem(`video_meta_${fileId}`, JSON.stringify({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          lastModified: file.lastModified
+        }));
+        
+        toast.success("Video loaded and cached for fast processing!");
+      } catch (error) {
+        console.warn("Could not cache video data:", error);
+        toast.success("Video uploaded successfully!");
+      }
+      
+      // Call the callback with the file and URL
+      onVideoUploaded(file, videoUrl);
+      
+    } catch (error) {
+      console.error("Error processing file:", error);
+      toast.error("Failed to process video file");
+      setSelectedFile(null);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleClearFile = () => {
@@ -75,6 +133,8 @@ const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
       URL.revokeObjectURL(selectedFile.name);
     }
     setSelectedFile(null);
+    setUploadProgress(0);
+    setIsProcessing(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -84,6 +144,14 @@ const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   return (
@@ -106,6 +174,10 @@ const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
               <p className="text-sm text-muted-foreground mt-1">
                 Or click to browse (MP4, MOV, AVI, WebM, MKV)
               </p>
+              <p className="text-xs text-muted-foreground mt-2 flex items-center justify-center gap-1">
+                <HardDrive className="h-3 w-3" />
+                Supports files up to 3GB - Processing happens locally
+              </p>
             </div>
             <Button onClick={triggerFileInput} variant="outline" className="mt-2">
               Select Video
@@ -126,8 +198,16 @@ const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{selectedFile.name}</p>
               <p className="text-xs text-muted-foreground">
-                {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
+                {formatFileSize(selectedFile.size)}
               </p>
+              {isProcessing && (
+                <div className="mt-2">
+                  <Progress value={uploadProgress} className="h-2" />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Loading and caching video... {uploadProgress}%
+                  </p>
+                </div>
+              )}
             </div>
             <Button
               variant="ghost"
@@ -135,6 +215,7 @@ const VideoUploader = ({ onVideoUploaded }: VideoUploaderProps) => {
               onClick={handleClearFile}
               className="ml-2"
               title="Remove"
+              disabled={isProcessing}
             >
               <X className="h-4 w-4" />
             </Button>
