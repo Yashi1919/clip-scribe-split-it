@@ -96,7 +96,8 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
         })
         .catch((error) => {
           console.error("Failed to initialize processor:", error);
-          toast.error("Failed to initialize fast processor, using fallback");
+          toast.error("Fast processor unavailable, using fallback method");
+          setProcessor(null); // Make sure processor is null so UI shows fallback
         })
         .finally(() => {
           setIsInitializingProcessor(false);
@@ -284,7 +285,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
       
       const formatConfig = VIDEO_FORMATS[selectedFormat];
       
-      if (processor) {
+      if (processor && processor.isAvailable) {
         // Use fast processor
         const results = await processor.processSegments(
           [{
@@ -350,7 +351,7 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
     try {
       const formatConfig = VIDEO_FORMATS[selectedFormat];
       
-      if (processor) {
+      if (processor && processor.isAvailable) {
         // Use high-speed parallel processing with automatic downloads
         toast.info("🚀 Starting lightning-fast processing with automatic downloads...");
         
@@ -361,62 +362,33 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
           index
         }));
         
-        await processor.processAndDownloadSegments(
-          segmentJobs,
-          formatConfig.extension,
-          videoFile.name,
-          (completed, total) => {
-            setDownloadProgress({ current: completed, total });
-            toast.info(`⚡ Auto-downloading: ${completed}/${total} segments`, {
-              id: 'fast-download-progress'
-            });
-          },
-          (segmentId, filename) => {
-            console.log(`Segment ${filename} processed and auto-downloaded`);
-          }
-        );
-        
-        toast.success(`⚡ Lightning-fast processing completed! ${cutSegments.length} segments automatically downloaded!`);
-      } else {
-        // Fallback to original method with warnings
-        toast.warning("Using slower fallback method. Fast processor not available.");
-        
-        for (let i = 0; i < cutSegments.length; i++) {
-          const segment = cutSegments[i];
-          
-          setDownloadProgress({ current: i + 1, total: cutSegments.length });
-          
-          toast.info(`Processing and downloading segment ${i + 1}/${cutSegments.length}...`, {
-            id: 'download-progress'
-          });
-          
-          try {
-            const blob = await createVideoSegment(
-              videoFile,
-              segment.startTime,
-              segment.endTime,
-              formatConfig.mimeType
-            );
-            
-            const fileName = generateOutputFileName(
-              videoFile.name,
-              `part${i + 1}`,
-              formatConfig.extension
-            );
-            
-            downloadFile(blob, fileName);
-            
-            if (i < cutSegments.length - 1) {
-              await new Promise(resolve => setTimeout(resolve, 100));
+        try {
+          await processor.processAndDownloadSegments(
+            segmentJobs,
+            formatConfig.extension,
+            videoFile.name,
+            (completed, total) => {
+              setDownloadProgress({ current: completed, total });
+              toast.info(`⚡ Auto-downloading: ${completed}/${total} segments`, {
+                id: 'fast-download-progress'
+              });
+            },
+            (segmentId, filename) => {
+              console.log(`Segment ${filename} processed and auto-downloaded`);
             }
-            
-          } catch (segmentError) {
-            console.error(`Error processing segment ${i + 1}:`, segmentError);
-            toast.error(`Failed to process segment ${i + 1}`);
-          }
+          );
+          
+          toast.success(`⚡ Lightning-fast processing completed! ${cutSegments.length} segments automatically downloaded!`);
+        } catch (processorError) {
+          console.error("Fast processor failed:", processorError);
+          toast.error("Fast processor failed, switching to fallback method...");
+          
+          // Fall back to slow method
+          await fallbackDownloadMethod(cutSegments, formatConfig);
         }
-        
-        toast.success(`Successfully processed and downloaded ${cutSegments.length} segments!`);
+      } else {
+        // Use fallback method
+        await fallbackDownloadMethod(cutSegments, formatConfig);
       }
       
     } catch (error) {
@@ -426,6 +398,48 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
       setIsDownloading(false);
       setDownloadProgress(null);
     }
+  };
+
+  const fallbackDownloadMethod = async (cutSegments: Segment[], formatConfig: any) => {
+    toast.warning("Using slower fallback method. Processing one segment at a time...");
+    
+    for (let i = 0; i < cutSegments.length; i++) {
+      const segment = cutSegments[i];
+      
+      setDownloadProgress({ current: i + 1, total: cutSegments.length });
+      
+      toast.info(`Processing and downloading segment ${i + 1}/${cutSegments.length}...`, {
+        id: 'download-progress'
+      });
+      
+      try {
+        const blob = await createVideoSegment(
+          videoFile,
+          segment.startTime,
+          segment.endTime,
+          formatConfig.mimeType
+        );
+        
+        const fileName = generateOutputFileName(
+          videoFile.name,
+          `part${i + 1}`,
+          formatConfig.extension
+        );
+        
+        downloadFile(blob, fileName);
+        
+        // Longer delay between segments to prevent browser throttling
+        if (i < cutSegments.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
+      } catch (segmentError) {
+        console.error(`Error processing segment ${i + 1}:`, segmentError);
+        toast.error(`Failed to process segment ${i + 1}`);
+      }
+    }
+    
+    toast.success(`Successfully processed and downloaded ${cutSegments.length} segments using fallback method!`);
   };
 
   const handleDownloadAsZip = async () => {
@@ -483,7 +497,6 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
         } catch (segmentError) {
           console.error(`Error processing segment ${i + 1}:`, segmentError);
           toast.error(`Failed to process segment ${i + 1}`);
-          // Continue with next segment
         }
       }
       
@@ -699,7 +712,12 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               <div className="flex items-center gap-4">
                 <div className="flex-1">
                   <div className="flex justify-between text-sm mb-2">
-                    <span>Processing and auto-downloading...</span>
+                    <span>
+                      {processor && processor.isAvailable 
+                        ? "Processing and auto-downloading..." 
+                        : "Processing with fallback method..."
+                      }
+                    </span>
                     <span>{downloadProgress.current}/{downloadProgress.total}</span>
                   </div>
                   <div className="w-full bg-secondary rounded-full h-2">
@@ -711,7 +729,10 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                 </div>
               </div>
               <p className="text-xs text-muted-foreground mt-2">
-                ⚡ Each segment is automatically downloaded as soon as it's processed!
+                {processor && processor.isAvailable 
+                  ? "⚡ Each segment is automatically downloaded as soon as it's processed!"
+                  : "🐌 Using slower method due to processor unavailability"
+                }
               </p>
             </div>
           )}
@@ -740,10 +761,17 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                 </Select>
               </div>
               
-              {processor && (
+              {processor && processor.isAvailable && (
                 <div className="flex items-center gap-2 text-green-600">
                   <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                  <span className="text-xs font-medium">⚡ Auto-Download Ready</span>
+                  <span className="text-xs font-medium">⚡ Fast Processor Ready</span>
+                </div>
+              )}
+              
+              {!processor && !isInitializingProcessor && (
+                <div className="flex items-center gap-2 text-amber-600">
+                  <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                  <span className="text-xs font-medium">🐌 Fallback Mode Only</span>
                 </div>
               )}
               
@@ -762,7 +790,10 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
                 variant="default"
               >
                 <Download className="mr-2 h-4 w-4" />
-                {isDownloading ? "Auto-downloading..." : `${processor ? "⚡ Process & Auto-Download" : "🐌 Slow Download"} All (${segments.filter(s => s.type !== "remove").length})`}
+                {isDownloading 
+                  ? "Processing..." 
+                  : `${processor?.isAvailable ? "⚡ Fast" : "🐌 Slow"} Download All (${segments.filter(s => s.type !== "remove").length})`
+                }
               </Button>
               
               <Button
@@ -786,15 +817,15 @@ const VideoSplitter = ({ videoFile, videoUrl, videoDuration }: VideoSplitterProp
               )}
             </div>
             
-            {processor && segments.filter(s => s.type !== "remove").length > 50 && (
+            {processor?.isAvailable && segments.filter(s => s.type !== "remove").length > 50 && (
               <p className="text-sm text-green-600 mt-2">
-                ⚡ Auto-download mode: Each segment downloads immediately after processing!
+                ⚡ Fast mode: Each segment downloads immediately after processing!
               </p>
             )}
             
-            {!processor && segments.filter(s => s.type !== "remove").length > 50 && (
+            {(!processor || !processor.isAvailable) && segments.filter(s => s.type !== "remove").length > 50 && (
               <p className="text-sm text-amber-600 mt-2">
-                ⚠️ Large number of segments - fast processor unavailable, using slower method
+                🐌 Fallback mode: Processing segments one at a time to prevent browser throttling
               </p>
             )}
           </div>

@@ -23,6 +23,7 @@ export class FastVideoProcessor {
   private activeJobs = new Map<string, { worker: Worker; resolve: Function; reject: Function }>();
   private maxWorkers: number;
   private videoData: ArrayBuffer | null = null;
+  private isFFmpegAvailable: boolean = true;
   
   constructor(options: ProcessingOptions = {}) {
     this.maxWorkers = Math.min(
@@ -37,32 +38,59 @@ export class FastVideoProcessor {
     
     // Create and initialize workers
     for (let i = 0; i < this.maxWorkers; i++) {
-      const worker = new Worker('/videoWorker.js');
-      
-      worker.onmessage = (e) => this.handleWorkerMessage(e, worker);
-      worker.onerror = (error) => this.handleWorkerError(error, worker);
-      
-      this.workers.push(worker);
-      
-      // Initialize FFmpeg in worker
-      worker.postMessage({ type: 'init' });
+      try {
+        const worker = new Worker('/videoWorker.js');
+        
+        worker.onmessage = (e) => this.handleWorkerMessage(e, worker);
+        worker.onerror = (error) => this.handleWorkerError(error, worker);
+        
+        this.workers.push(worker);
+        
+        // Initialize FFmpeg in worker
+        worker.postMessage({ type: 'init' });
+      } catch (error) {
+        console.warn('Failed to create worker:', error);
+        this.isFFmpegAvailable = false;
+      }
     }
     
-    // Wait for all workers to be ready
-    await Promise.all(
-      this.workers.map(worker => 
-        new Promise<void>((resolve) => {
-          const handler = (e: MessageEvent) => {
-            if (e.data.type === 'ready') {
-              worker.removeEventListener('message', handler);
-              this.availableWorkers.push(worker);
-              resolve();
-            }
-          };
-          worker.addEventListener('message', handler);
-        })
-      )
+    if (this.workers.length === 0) {
+      throw new Error('No workers could be created');
+    }
+    
+    // Wait for all workers to be ready or fail
+    const workerPromises = this.workers.map(worker => 
+      new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => {
+          console.warn('Worker initialization timeout');
+          resolve(false);
+        }, 10000); // 10 second timeout
+        
+        const handler = (e: MessageEvent) => {
+          if (e.data.type === 'ready') {
+            worker.removeEventListener('message', handler);
+            this.availableWorkers.push(worker);
+            clearTimeout(timeout);
+            resolve(true);
+          } else if (e.data.type === 'error' && e.data.ffmpegUnavailable) {
+            worker.removeEventListener('message', handler);
+            clearTimeout(timeout);
+            resolve(false);
+          }
+        };
+        worker.addEventListener('message', handler);
+      })
     );
+    
+    const results = await Promise.all(workerPromises);
+    const successfulWorkers = results.filter(Boolean).length;
+    
+    if (successfulWorkers === 0) {
+      this.isFFmpegAvailable = false;
+      throw new Error('FFmpeg workers failed to initialize - falling back to slower method');
+    }
+    
+    console.log(`Initialized ${successfulWorkers}/${this.workers.length} FFmpeg workers`);
   }
   
   async processSegments(
@@ -73,6 +101,10 @@ export class FastVideoProcessor {
   ): Promise<Map<string, ArrayBuffer>> {
     if (!this.videoData) {
       throw new Error('Video processor not initialized');
+    }
+    
+    if (!this.isFFmpegAvailable || this.availableWorkers.length === 0) {
+      throw new Error('No FFmpeg workers available');
     }
     
     const results = new Map<string, ArrayBuffer>();
@@ -140,6 +172,10 @@ export class FastVideoProcessor {
   ): Promise<void> {
     if (!this.videoData) {
       throw new Error('Video processor not initialized');
+    }
+    
+    if (!this.isFFmpegAvailable || this.availableWorkers.length === 0) {
+      throw new Error('No FFmpeg workers available');
     }
     
     let completed = 0;
@@ -220,7 +256,7 @@ export class FastVideoProcessor {
   }
   
   private handleWorkerMessage(e: MessageEvent, worker: Worker) {
-    const { type, segmentId, data, error } = e.data;
+    const { type, segmentId, data, error, ffmpegUnavailable } = e.data;
     
     switch (type) {
       case 'segmentComplete':
@@ -235,7 +271,11 @@ export class FastVideoProcessor {
       case 'error':
         const errorJob = this.activeJobs.get(segmentId);
         if (errorJob) {
-          errorJob.reject(new Error(error));
+          if (ffmpegUnavailable) {
+            errorJob.reject(new Error('FFmpeg not available in worker'));
+          } else {
+            errorJob.reject(new Error(error));
+          }
           this.activeJobs.delete(segmentId);
           this.availableWorkers.push(worker);
         }
@@ -264,6 +304,10 @@ export class FastVideoProcessor {
     this.availableWorkers = [];
     this.activeJobs.clear();
     this.processingQueue = [];
+  }
+  
+  get isAvailable(): boolean {
+    return this.isFFmpegAvailable && this.availableWorkers.length > 0;
   }
 }
 
