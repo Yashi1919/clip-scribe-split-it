@@ -2,21 +2,27 @@ import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { formatTime } from "@/lib/videoUtils";
-import { Play, Pause, Scissors, Trash, X } from "lucide-react";
+import { Play, Pause, Scissors, Trash, X, Download, Split } from "lucide-react";
+import { FastVideoProcessor } from "@/lib/fastVideoProcessor";
+import { toast } from "sonner";
 
 interface VideoTimelineEditorProps {
   videoUrl: string;
   videoDuration: number;
+  videoFile?: File;
   onCutSegment: (startTime: number, endTime: number) => void;
   onRemoveSegment?: (startTime: number, endTime: number) => void;
+  onDeleteSegment?: (startTime: number, endTime: number) => void;
   videoId?: string; // Optional ID to use for localStorage persistence
 }
 
 const VideoTimelineEditor = ({
   videoUrl,
   videoDuration,
+  videoFile,
   onCutSegment,
   onRemoveSegment,
+  onDeleteSegment,
   videoId
 }: VideoTimelineEditorProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -25,7 +31,8 @@ const VideoTimelineEditor = ({
   const [markers, setMarkers] = useState<number[]>([]);
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
-  const [mode, setMode] = useState<"cut" | "remove">("cut");
+  const [mode, setMode] = useState<"cut" | "remove" | "delete">("cut");
+  const [isProcessing, setIsProcessing] = useState(false);
   
   const localStorageKey = videoId ? `timeline_${videoId}` : null;
 
@@ -155,12 +162,14 @@ const VideoTimelineEditor = ({
     }
   };
 
-  const handleCutSegment = () => {
+  const handleCutSegment = async () => {
     if (selectionStart !== null && selectionEnd !== null) {
       if (mode === "cut") {
         onCutSegment(selectionStart, selectionEnd);
       } else if (mode === "remove" && onRemoveSegment) {
         onRemoveSegment(selectionStart, selectionEnd);
+      } else if (mode === "delete") {
+        await handleDeleteSegment();
       }
       // Reset selection after cutting
       setSelectionStart(null);
@@ -168,8 +177,181 @@ const VideoTimelineEditor = ({
     }
   };
 
+  const handleDeleteSegment = async () => {
+    if (!videoFile || selectionStart === null || selectionEnd === null) {
+      toast.error("Video file not available or no segment selected");
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const processor = new FastVideoProcessor({
+        maxConcurrentWorkers: 2,
+        memoryThreshold: 500
+      });
+
+      await processor.initialize(videoFile);
+
+      // Create segments before and after the deleted portion
+      const segments = [];
+      
+      // First segment (0 to selectionStart)
+      if (selectionStart > 0) {
+        segments.push({
+          id: "before_delete",
+          startTime: 0,
+          endTime: selectionStart,
+          index: 0
+        });
+      }
+
+      // Second segment (selectionEnd to end)
+      if (selectionEnd < videoDuration) {
+        segments.push({
+          id: "after_delete",
+          startTime: selectionEnd,
+          endTime: videoDuration,
+          index: segments.length
+        });
+      }
+
+      if (segments.length === 0) {
+        toast.error("Cannot delete entire video");
+        return;
+      }
+
+      // Process and download segments
+      const baseName = videoFile.name.replace(/\.[^/.]+$/, "");
+      
+      await processor.processAndDownloadSegments(
+        segments,
+        'mp4',
+        `${baseName}_edited`,
+        (completed, total) => {
+          console.log(`Processing: ${completed}/${total}`);
+        },
+        (segmentId, filename) => {
+          toast.success(`Downloaded: ${filename}`);
+        }
+      );
+
+      processor.destroy();
+      
+      if (onDeleteSegment) {
+        onDeleteSegment(selectionStart, selectionEnd);
+      }
+      
+      toast.success("Segment deleted and video parts downloaded!");
+      
+    } catch (error) {
+      console.error("Error deleting segment:", error);
+      toast.error("Failed to delete segment");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSplitVideo = async () => {
+    if (!videoFile || selectionStart === null || selectionEnd === null) {
+      toast.error("Video file not available or no segment selected");
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const processor = new FastVideoProcessor({
+        maxConcurrentWorkers: 3,
+        memoryThreshold: 500
+      });
+
+      await processor.initialize(videoFile);
+
+      // Create three segments: before, during, and after
+      const segments = [];
+      
+      // First segment (0 to selectionStart)
+      if (selectionStart > 0) {
+        segments.push({
+          id: "part_1",
+          startTime: 0,
+          endTime: selectionStart,
+          index: 0
+        });
+      }
+
+      // Selected segment
+      segments.push({
+        id: "part_selected",
+        startTime: selectionStart,
+        endTime: selectionEnd,
+        index: segments.length
+      });
+
+      // Third segment (selectionEnd to end)
+      if (selectionEnd < videoDuration) {
+        segments.push({
+          id: "part_3",
+          startTime: selectionEnd,
+          endTime: videoDuration,
+          index: segments.length
+        });
+      }
+
+      // Process and download all segments
+      const baseName = videoFile.name.replace(/\.[^/.]+$/, "");
+      
+      await processor.processAndDownloadSegments(
+        segments,
+        'mp4',
+        `${baseName}_split`,
+        (completed, total) => {
+          console.log(`Processing: ${completed}/${total}`);
+        },
+        (segmentId, filename) => {
+          toast.success(`Downloaded: ${filename}`);
+        }
+      );
+
+      processor.destroy();
+      toast.success("Video split into parts and downloaded!");
+      
+    } catch (error) {
+      console.error("Error splitting video:", error);
+      toast.error("Failed to split video");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const toggleMode = () => {
-    setMode(mode === "cut" ? "remove" : "cut");
+    const modes = ["cut", "remove", "delete"] as const;
+    const currentIndex = modes.indexOf(mode);
+    const nextIndex = (currentIndex + 1) % modes.length;
+    setMode(modes[nextIndex]);
+  };
+
+  const getModeIcon = () => {
+    switch (mode) {
+      case "cut": return <Scissors className="h-4 w-4 mr-1" />;
+      case "remove": return <X className="h-4 w-4 mr-1" />;
+      case "delete": return <Trash className="h-4 w-4 mr-1" />;
+    }
+  };
+
+  const getModeColor = () => {
+    switch (mode) {
+      case "cut": return "secondary";
+      case "remove": return "destructive";
+      case "delete": return "outline";
+    }
+  };
+
+  const getModeDescription = () => {
+    switch (mode) {
+      case "cut": return "Extract segment";
+      case "remove": return "Remove segment";
+      case "delete": return "Delete segment from video";
+    }
   };
 
   return (
@@ -259,6 +441,7 @@ const VideoTimelineEditor = ({
           variant="outline"
           size="sm"
           onClick={addMarker}
+          disabled={isProcessing}
         >
           Add Marker at {formatTime(currentTime)}
         </Button>
@@ -267,38 +450,52 @@ const VideoTimelineEditor = ({
           variant="outline"
           size="sm" 
           onClick={clearMarkers}
+          disabled={isProcessing}
         >
           Clear Markers
         </Button>
         
         <Button
-          variant={mode === "cut" ? "secondary" : "destructive"}
+          variant={getModeColor()}
           size="sm"
           onClick={toggleMode}
+          disabled={isProcessing}
         >
-          {mode === "cut" ? 
-            <Scissors className="h-4 w-4 mr-1" /> : 
-            <X className="h-4 w-4 mr-1" />
-          }
-          Mode: {mode === "cut" ? "Cut Segment" : "Remove Segment"}
+          {getModeIcon()}
+          Mode: {getModeDescription()}
         </Button>
         
         <Button
-          variant={mode === "cut" ? "secondary" : "destructive"}
+          variant={getModeColor()}
           size="sm"
           onClick={handleCutSegment}
-          disabled={selectionStart === null || selectionEnd === null}
+          disabled={selectionStart === null || selectionEnd === null || isProcessing}
         >
-          {mode === "cut" ? 
-            <Scissors className="h-4 w-4 mr-1" /> : 
-            <X className="h-4 w-4 mr-1" />
-          }
-          {mode === "cut" ? "Cut" : "Remove"} Segment ({selectionStart !== null && selectionEnd !== null
-            ? `${formatTime(selectionStart)} - ${formatTime(selectionEnd)}`
-            : "Select markers"}
-          )
+          {getModeIcon()}
+          {mode === "cut" ? "Cut" : mode === "remove" ? "Remove" : "Delete"} Segment
+          {selectionStart !== null && selectionEnd !== null && (
+            ` (${formatTime(selectionStart)} - ${formatTime(selectionEnd)})`
+          )}
         </Button>
+
+        {videoFile && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSplitVideo}
+            disabled={selectionStart === null || selectionEnd === null || isProcessing}
+          >
+            <Split className="h-4 w-4 mr-1" />
+            Split Video into Parts
+          </Button>
+        )}
       </div>
+      
+      {isProcessing && (
+        <div className="text-sm text-muted-foreground">
+          Processing video... This may take a moment for large files.
+        </div>
+      )}
       
       {markers.length > 0 && (
         <div className="text-sm text-muted-foreground">
